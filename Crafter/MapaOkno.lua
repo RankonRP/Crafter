@@ -312,7 +312,7 @@ end
 
 -- otevřít mapu: zone = mapa (nebo tvoje zóna), item = zvýraznit jen jeden předmět
 function C.OpenMap(zone, item, tg)
-    if CrafterDB.mapW then W = CrafterDB.mapW end
+    if CrafterDB.mapW then W = math.max(540, CrafterDB.mapW) end
     if not win then create() end
     onlyItem = item
     target = tg
