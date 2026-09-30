@@ -216,11 +216,14 @@ local function create()
     prev:SetPoint("TOPLEFT", 190, -6)
     prev:SetText("<")
     prev:SetScript("OnClick", function() cycle(-1) end)
-    win.zone = fs(win, 13)
-    win.zone:SetPoint("LEFT", prev, "RIGHT", 8, 0)
     local nextB = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
     nextB:SetSize(26, 22)
     nextB:SetPoint("TOPRIGHT", -34, -6)
+    win.zone = fs(win, 13)
+    win.zone:SetPoint("LEFT", prev, "RIGHT", 8, 0)
+    win.zone:SetPoint("RIGHT", nextB, "LEFT", -8, 0)
+    win.zone:SetJustifyH("CENTER")
+    win.zone:SetWordWrap(false)
     nextB:SetText(">")
     nextB:SetScript("OnClick", function() cycle(1) end)
 
@@ -230,7 +233,7 @@ local function create()
     for i, o in ipairs(FILTER) do
         local cb = CreateFrame("CheckButton", nil, win, "UICheckButtonTemplate")
         cb:SetSize(22, 22)
-        cb:SetPoint("TOPLEFT", 10 + (i - 1) * 100, -32)
+        cb:SetPoint("TOPLEFT", 10 + (i - 1) * 92, -32)
         cb:SetHitRectInsets(0, -70, 0, 0)
         if cb.Text then cb.Text:SetText("") end
         local l = fs(win, 12)
@@ -244,7 +247,7 @@ local function create()
         win.checks[o[1]] = cb
     end
     local all = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
-    all:SetSize(120, 22)
+    all:SetSize(110, 22)
     all:SetPoint("TOPRIGHT", -10, -32)
     all:SetNormalFontObject(CrafterFontButton)
     all:SetHighlightFontObject(CrafterFontButtonHl)
@@ -265,7 +268,7 @@ local function create()
 
     -- táhlo pro změnu velikosti (vpravo dole)
     win:SetResizable(true)
-    if win.SetResizeBounds then win:SetResizeBounds(420, 330, 1600, 1150) end
+    if win.SetResizeBounds then win:SetResizeBounds(560, 420, 1600, 1150) end
     local grip = CreateFrame("Button", nil, win)
     grip:SetSize(16, 16)
     grip:SetPoint("BOTTOMRIGHT", -2, 2)
@@ -273,11 +276,21 @@ local function create()
     grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
     grip:SetScript("OnMouseDown", function() win:StartSizing("BOTTOMRIGHT") end)
-    grip:SetScript("OnMouseUp", function()
-        win:StopMovingOrSizing()
-        W = math.floor(math.max(400, math.min(1580, win:GetWidth() - 20)))
-        CrafterDB.mapW = W
-        if mapID then drawArt(); drawPins() end
+    grip:SetScript("OnMouseUp", function() win:StopMovingOrSizing() end)
+    -- mapu přizpůsobit šířce okna (i během tažení; výška se dopočítá podle poměru mapy)
+    local pendingResize
+    win:SetScript("OnSizeChanged", function(self, w)
+        if self.sizing or pendingResize then return end
+        pendingResize = true
+        C_Timer.After(0.15, function()
+            pendingResize = nil
+            local newW = math.floor(math.max(540, math.min(1580, win:GetWidth() - 20)))
+            if newW ~= W or math.abs(win:GetHeight() - (canvas:GetHeight() + 96)) > 2 then
+                W = newW
+                CrafterDB.mapW = W
+                if mapID then drawArt(); drawPins() end
+            end
+        end)
     end)
     local mm = CreateFrame("CheckButton", nil, win, "UICheckButtonTemplate")
     mm:SetSize(22, 22)
