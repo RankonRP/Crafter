@@ -402,6 +402,7 @@ function C.ShowDetail(r)
     if not detail then
         detail = window("CrafterDetail", 380, 460)
         detail:SetFrameStrata("HIGH")
+        detail:SetToplevel(true)
         detail.sf, detail.content = scrollArea(detail, -34, 44)
         local legend = text(detail, fontSmall, 0.65, 0.65, 0.65)
         legend:SetPoint("BOTTOMLEFT", 10, 14)
@@ -425,6 +426,9 @@ local function listRow(i)
     local row = listRows[i]
     if row then return row end
     row = CreateFrame("Button", nil, list.content)
+    row:RegisterForDrag("LeftButton")
+    row:SetScript("OnDragStart", function() list:StartMoving() end)
+    row:SetScript("OnDragStop", function() list.savePos() end)
     row:SetHeight(22)
     row:SetPoint("TOPLEFT", 0, -(i - 1) * 24)
     row:SetPoint("RIGHT", list.content, "RIGHT", 0, 0)
@@ -560,12 +564,20 @@ C.RefreshList = refreshList
 
 local function createList()
     list = window("CrafterList", 340, 400)
-    list:SetPoint("CENTER", 250, 0)
-    list:SetFrameStrata("HIGH")
+    -- poloha: uložená, jinak vlevo dole (mimo panel a okno Suroviny)
+    local pos = CrafterDB.listPos
+    if pos then list:SetPoint(pos[1], UIParent, pos[1], pos[2], pos[3]) else list:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 40, 120) end
+    list:SetFrameStrata("DIALOG")   -- nad panelem a oknem Suroviny
+    list:SetToplevel(true)
     list:SetMovable(true)
     list:RegisterForDrag("LeftButton")
+    list.savePos = function()
+        list:StopMovingOrSizing()
+        local p, _, _, x, y = list:GetPoint()
+        CrafterDB.listPos = { p, math.floor(x + 0.5), math.floor(y + 0.5) }
+    end
     list:SetScript("OnDragStart", list.StartMoving)
-    list:SetScript("OnDragStop", list.StopMovingOrSizing)
+    list:SetScript("OnDragStop", list.savePos)
     tinsert(UISpecialFrames, "CrafterList")
     list.title:SetText("Crafter – nákupní seznam")
     list.sf, list.content = scrollArea(list, -32, 76)
@@ -593,7 +605,7 @@ function C.ToggleList(show)
     if not list then createList() end
     if show == nil then show = not list:IsShown() end
     list:SetShown(show)
-    if show then refreshList() end
+    if show then list:Raise(); refreshList() end
 end
 
 -------------------------------------------------------------------------------
