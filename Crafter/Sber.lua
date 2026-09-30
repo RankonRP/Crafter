@@ -81,13 +81,79 @@ local function store(itemID, kind, sourceName, map, x, y)
     addPoint(map, x, y, itemID, kind)
 end
 
+-- záznam posledních událostí pro /crafter ladit
+S.log = {}
+local function log(s)
+    table.insert(S.log, date("%H:%M:%S") .. " " .. s)
+    if #S.log > 8 then table.remove(S.log, 1) end
+end
+
+-- druh sběru podle názvu kouzla (Mining, Herb Gathering, Skinning, Fishing – i jiné varianty)
+local function kindFromSpell(name)
+    if not name then return nil end
+    if GATHER_SPELLS[name] then return GATHER_SPELLS[name] end
+    local n = name:lower()
+    if n:find("min") then return "m" end
+    if n:find("herb") then return "h" end
+    if n:find("skin") then return "s" end
+    if n:find("fish") then return "f" end
+end
+
+-- druh sběru podle získaného předmětu (když kouzlo nepoznáme)
+local function kindFromItem(id, name)
+    local cls, sub
+    if C_Item and C_Item.GetItemInfoInstant then
+        local ok, _, _, _, _, _, c, s = pcall(C_Item.GetItemInfoInstant, id)
+        if ok then cls, sub = c, s end
+    end
+    name = name or ""
+    if name:find(" Ore$") or name:find("Stone$") or (cls == 7 and sub == 7) then return "m" end
+    if name:find("Leather") or name:find("Hide") or name:find("Scale") or (cls == 7 and sub == 6) then return "s" end
+    if cls == 7 and sub == 9 then return "h" end
+    local z = Crafter_Zdroje and Crafter_Zdroje[id]
+    if z and z.g then
+        for _, g in ipairs(z.g) do
+            local o = Crafter_OBJ[g[1]]
+            if o then return (o.n:find("Vein") or o.n:find("Deposit")) and "m" or "h" end
+        end
+    end
+end
+
+local lastLoot = 0
 local function onLoot()
-    if not gather or GetTime() - gather.time > (gather.kind == "f" and 40 or 6) then gather = nil return end
-    for i = 1, (GetNumLootItems and GetNumLootItems() or 0) do
+    local n = GetNumLootItems and GetNumLootItems() or 0
+    if n == 0 then return end
+    if GetTime() - lastLoot < 1 then return end   -- LOOT_READY a LOOT_OPENED přijdou obě
+    lastLoot = GetTime()
+    -- odkud kořist je: ložisko/bylina/chycená ryba = GameObject, stažené zvíře = Creature
+    local srcGUID = GetLootSourceInfo and GetLootSourceInfo(1)
+    local srcType = srcGUID and srcGUID:match("^(%a+)%-") or "?"
+    local recent = gather and (GetTime() - gather.time) <= (gather.kind == "f" and 40 or 8)
+    local kind = recent and gather.kind or nil
+    -- normální kořist z mrtvoly (bez kouzla sběru) ignorovat
+    if not kind and srcType ~= "GameObject" then log("korist bez sberu (" .. srcType .. ")") return end
+    local x, y, map
+    if recent then x, y, map = gather.x, gather.y, gather.map
+    else
+        local a, b, m = C.PlayerWorld()
+        if not a then log("neznam polohu") return end
+        x, y, map = math.floor(a + 0.5), math.floor(b + 0.5), m
+    end
+    local saved = 0
+    for i = 1, n do
         local link = GetLootSlotLink(i)
         local id = link and tonumber(link:match("item:(%d+)"))
-        if id then store(id, gather.kind, gather.target, gather.map, gather.x, gather.y) end
+        if id then
+            local itemName = link:match("%[(.-)%]")
+            local k = kind or kindFromItem(id, itemName)
+            if k then
+                store(id, k, gather and gather.target, map, x, y)
+                saved = saved + 1
+                log(("ulozeno: %s (%s) z %s"):format(itemName or id, k, srcType))
+            end
+        end
     end
+    if saved == 0 then log("korist z " .. srcType .. " - nic ke sberu") end
     gather = nil
     S.RefreshWorld()
     if C.MapChanged then C.MapChanged() end
@@ -117,6 +183,20 @@ local function toMap(f, map, x, y)
     local v = C.Vec(map, x, y)
     local dx, dy = v.x - f.ox, v.y - f.oy
     return (dx * f.ux + dy * f.uy) / f.uu, (dx * f.vx + dy * f.vy) / f.vv
+end
+
+-- /crafter ladit: poslední události sběru a co je uložené
+function S.Debug()
+    C.Msg(("ulozenych mist: %d"):format(S.FoundCount()))
+    local items = {}
+    for id, f in pairs(CrafterDB.found) do
+        if type(id) == "number" then items[#items + 1] = ("%s (%s, %d)"):format(S.ItemName(id), f.t or "?", #f.p / 3) end
+    end
+    if #items > 0 then C.Msg("predmety: " .. table.concat(items, ", ")) end
+    local a, b, inst, src = C.PlayerWorld()
+    C.Msg(("poloha: %s, %s kontinent %s (%s)"):format(tostring(a), tostring(b), tostring(inst), tostring(src)))
+    if #S.log == 0 then C.Msg("zadne udalosti sberu od nacteni - zkus neco vytezit / natrhat / stahnout") end
+    for _, l in ipairs(S.log) do print("   " .. l) end
 end
 
 -- Sdílení nálezů: text "CRAFTER1:id,druh,mapa,x,y,mapa,x,y;id,…" (jen čísla a písmena – nic se nespouští)
@@ -390,7 +470,9 @@ ev:SetScript("OnEvent", function(_, event, unit, a2, a3)
     end
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         if unit ~= "player" then return end
-        local kind = GATHER_SPELLS[spellName(a3) or ""]
+        local sname = spellName(a3)
+        local kind = kindFromSpell(sname)
+        if kind then log(("kouzlo %s (%s) -> %s"):format(tostring(sname), tostring(a3), kind)) end
         if kind then
             local x, y, map = C.PlayerWorld()
             if x then gather = { kind = kind, target = pendingTarget, time = GetTime(), map = map, x = math.floor(x + 0.5), y = math.floor(y + 0.5) } end
