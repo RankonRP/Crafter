@@ -1,4 +1,7 @@
--- Crafter: okna – panel „Co vyrobit“ u okna profese, nákupní seznam, ikona u minimapy
+-- Crafter: jedno okno se třemi záložkami
+--   1. Na skill  – co teď vyrobit, aby rostla dovednost (a kolik kusů)
+--   2. Co chybí  – suroviny, které chybí (i přepočet bar -> ruda) a kde je sehnat; nákup u obchodníka
+--   3. Mapa      – tvoje nálezy (kůže, rudy, byliny, ryby); mapa je z MapaOkno.lua vložená sem
 local C = Crafter
 local FONT = "Interface\\AddOns\\Crafter\\Fonts\\cz.ttf"
 
@@ -8,6 +11,8 @@ local fontSmall = CreateFont("CrafterFontSmall")
 fontSmall:SetFont(FONT, 10, "")
 local fontTitle = CreateFont("CrafterFontTitle")
 fontTitle:SetFont(FONT, 14, "")
+local fontBig = CreateFont("CrafterFontBig")
+fontBig:SetFont(FONT, 15, "")
 local fontButton = CreateFont("CrafterFontButton")
 fontButton:SetFont(FONT, 12, "")
 fontButton:SetTextColor(1, 0.82, 0)
@@ -17,17 +22,19 @@ fontButtonHl:SetTextColor(1, 1, 1)
 
 local BACKDROP = { bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 }
 local ACCENT = { 0.9, 0.7, 0.3 }
+local W, H = 400, 570   -- velikost okna
 
 local function text(parent, font, r, g, b)
     local fs = parent:CreateFontString(nil, "OVERLAY")
     fs:SetFontObject(font)
     fs:SetTextColor(r or 1, g or 1, b or 1)
+    fs:SetJustifyH("LEFT")
     return fs
 end
 
-local function czechButton(parent, w, label)
+local function button(parent, w, label)
     local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    b:SetSize(w, 22)
+    b:SetSize(w, 24)
     b:SetNormalFontObject(fontButton)
     b:SetHighlightFontObject(fontButtonHl)
     b:SetDisabledFontObject(fontButton)
@@ -35,23 +42,7 @@ local function czechButton(parent, w, label)
     return b
 end
 
-local function window(name, w, h)
-    local f = CreateFrame("Frame", name, UIParent, "BackdropTemplate")
-    f:SetSize(w, h)
-    f:SetBackdrop(BACKDROP)
-    f:SetBackdropColor(0.03, 0.03, 0.03, 0.95)
-    f:SetBackdropBorderColor(ACCENT[1], ACCENT[2], ACCENT[3], 1)
-    f:EnableMouse(true)
-    f:SetClampedToScreen(true)
-    f:Hide()
-    f.title = text(f, fontTitle, ACCENT[1], ACCENT[2], ACCENT[3])
-    f.title:SetPoint("TOPLEFT", 10, -9)
-    f.title:SetPoint("RIGHT", -30, 0)
-    f.title:SetJustifyH("LEFT")
-    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", 2, 2)
-    return f
-end
+local function colorText(r, g, b, s) return ("|cff%02x%02x%02x%s|r"):format(r * 255, g * 255, b * 255, s) end
 
 -- vlastní popisek s českým písmem
 local tip = CreateFrame("GameTooltip", "CrafterTooltip", UIParent, "GameTooltipTemplate")
@@ -67,602 +58,512 @@ local function showTip(owner, lines)
 end
 local function hideTip() tip:Hide() end
 
--- vytvoří posuvný seznam: vrací scroll a obsah (child), do kterého se kreslí řádky
+-- posuvný seznam uvnitř stránky
 local function scrollArea(parent, top, bottom)
     local sf = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", 8, top)
-    sf:SetPoint("BOTTOMRIGHT", -28, bottom)
+    sf:SetPoint("TOPLEFT", 0, top)
+    sf:SetPoint("BOTTOMRIGHT", -22, bottom)
     local content = CreateFrame("Frame", nil, sf)
-    content:SetSize(parent:GetWidth() - 36, 10)
+    content:SetSize(W - 40, 10)
     sf:SetScrollChild(content)
-    sf:SetScript("OnSizeChanged", function(self, w) content:SetWidth(w) end)
     return sf, content
 end
 
-local refreshList   -- nákupní seznam (níž)
-
--------------------------------------------------------------------------------
--- Panel „Co vyrobit“ vedle okna profese
--------------------------------------------------------------------------------
-local panel, rows, recipes, selected, qty = nil, {}, {}, nil, 1
+local main, pages, tabs, current = nil, {}, {}, 1
 local provider
+local refreshSkill, refreshNeed
 
-local function sortRecipes(list)
-    table.sort(list, function(a, b)
+-------------------------------------------------------------------------------
+-- Hlavní okno
+-------------------------------------------------------------------------------
+local function savePos()
+    main:StopMovingOrSizing()
+    local p, _, _, x, y = main:GetPoint()
+    CrafterDB.mainPos = { p, math.floor(x + 0.5), math.floor(y + 0.5) }
+end
+
+function C.ShowMainTab(n)
+    if not main then return end
+    current = n
+    for i, p in ipairs(pages) do p:SetShown(i == n) end
+    for i, t in ipairs(tabs) do
+        local on = i == n
+        t.line:SetShown(on)
+        t.label:SetTextColor(on and 1 or 0.65, on and 0.85 or 0.65, on and 0.3 or 0.65)
+    end
+    main:Show()
+    main:Raise()
+    if n == 1 then refreshSkill() elseif n == 2 then refreshNeed() else C.MapTabShown() end
+end
+
+local function createMain()
+    main = CreateFrame("Frame", "CrafterMain", UIParent, "BackdropTemplate")
+    main:SetSize(W, H)
+    main:SetBackdrop(BACKDROP)
+    main:SetBackdropColor(0.03, 0.03, 0.03, 0.96)
+    main:SetBackdropBorderColor(ACCENT[1], ACCENT[2], ACCENT[3], 1)
+    main:SetFrameStrata("HIGH")
+    main:SetToplevel(true)
+    main:EnableMouse(true)
+    main:SetMovable(true)
+    main:SetClampedToScreen(true)
+    main:RegisterForDrag("LeftButton")
+    main:SetScript("OnDragStart", main.StartMoving)
+    main:SetScript("OnDragStop", savePos)
+    main:Hide()
+    tinsert(UISpecialFrames, "CrafterMain")
+    local pos = CrafterDB.mainPos
+    if pos then main:SetPoint(pos[1], UIParent, pos[1], pos[2], pos[3]) else main:SetPoint("CENTER", 200, 0) end
+
+    main.title = text(main, fontTitle, ACCENT[1], ACCENT[2], ACCENT[3])
+    main.title:SetPoint("TOPLEFT", 12, -10)
+    main.skill = text(main, fontNormal, 0.8, 0.8, 0.8)
+    main.skill:SetPoint("TOPRIGHT", -34, -11)
+    main.skill:SetJustifyH("RIGHT")
+    local close = CreateFrame("Button", nil, main, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", 2, 2)
+
+    -- záložky
+    local LABELS = { "Na skill", "Co chybí", "Mapa" }
+    local tw = (W - 16) / 3
+    for i, label in ipairs(LABELS) do
+        local t = CreateFrame("Button", nil, main)
+        t:SetSize(tw, 26)
+        t:SetPoint("TOPLEFT", 8 + (i - 1) * tw, -32)
+        t.label = text(t, fontBig)
+        t.label:SetPoint("CENTER")
+        t.label:SetText(label)
+        t.line = t:CreateTexture(nil, "ARTWORK")
+        t.line:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 1)
+        t.line:SetPoint("BOTTOMLEFT", 6, 0)
+        t.line:SetPoint("BOTTOMRIGHT", -6, 0)
+        t.line:SetHeight(2)
+        local hl = t:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 1, 1, 0.05)
+        t:SetScript("OnClick", function() C.ShowMainTab(i) end)
+        tabs[i] = t
+    end
+    local sep = main:CreateTexture(nil, "ARTWORK")
+    sep:SetColorTexture(1, 1, 1, 0.12)
+    sep:SetPoint("TOPLEFT", 8, -58)
+    sep:SetPoint("TOPRIGHT", -8, -58)
+    sep:SetHeight(1)
+
+    for i = 1, 3 do
+        local p = CreateFrame("Frame", nil, main)
+        p:SetPoint("TOPLEFT", 10, -64)
+        p:SetPoint("BOTTOMRIGHT", -10, 10)
+        p:Hide()
+        pages[i] = p
+    end
+end
+
+local function updateHeader()
+    provider = C.Provider()
+    if provider then
+        local name, rank, max = provider.line()
+        main.title:SetText("Crafter – " .. (name or "?"))
+        rank, max = tonumber(rank), tonumber(max)
+        if rank and max then
+            main.skill:SetText(max > rank and ("%d / %d · zbývá %d"):format(rank, max, max - rank) or ("%d / %d · max"):format(rank, max))
+        else
+            main.skill:SetText("")
+        end
+        main.rank, main.max = rank, max
+    else
+        main.title:SetText("Crafter")
+        main.skill:SetText("")
+        main.rank, main.max = nil, nil
+    end
+end
+
+-------------------------------------------------------------------------------
+-- 1. Na skill
+-------------------------------------------------------------------------------
+local skill = {}       -- prvky stránky
+local focus            -- recept v kartě doporučení
+
+-- kolik kusů je potřeba na zbývající body (oranžový = bod za kus)
+local function piecesToMax(r)
+    if not main.rank or not main.max then return 1 end
+    local left = main.max - main.rank
+    if left <= 0 then return 1 end
+    if r.diff == "medium" then left = math.ceil(left * 1.5) elseif r.diff == "easy" then left = left * 3 end
+    return math.max(1, math.min(999, left))
+end
+
+-- recepty, které zvednou skill, seřazené: jistota bodu, pak co hned vyrobíš, pak cena
+local function skillRecipes()
+    local out = {}
+    if not provider then return out end
+    for _, r in ipairs(provider.recipes()) do
+        if r.diff ~= "trivial" then out[#out + 1] = r end
+    end
+    table.sort(out, function(a, b)
         local da, db = (C.DIFF[a.diff] or C.DIFF.easy).order, (C.DIFF[b.diff] or C.DIFF.easy).order
         if da ~= db then return da < db end
-        local ca, ua = C.RecipeCost(a)
-        local cb, ub = C.RecipeCost(b)
-        if ua ~= ub then return not ua end
+        if (a.numAvailable > 0) ~= (b.numAvailable > 0) then return a.numAvailable > 0 end
+        local ca = C.RecipeCost(a)
+        local cb = C.RecipeCost(b)
         if ca ~= cb then return ca < cb end
         return a.name < b.name
     end)
+    return out
 end
 
-local function reagentLines(r, times)
-    times = times or 1
-    local lines = {}
-    for _, rg in ipairs(r.reagents) do
-        local need = rg.need * times
-        local ok = rg.have >= need
-        local price = C.PriceOf(rg.id)
-        lines[#lines + 1] = { ("%d× %s  (máš %d)%s"):format(need, rg.name or "?", rg.have, price and ("  " .. C.Money(price) .. "/ks") or ""),
-                              ok and 0.6 or 1, ok and 1 or 0.4, ok and 0.6 or 0.4 }
+local function setPlan(r, qty)
+    for i = #CrafterDB.list, 1, -1 do
+        if CrafterDB.list[i].name == r.name then table.remove(CrafterDB.list, i) end
     end
-    return lines
+    C.AddToList(r, qty)
 end
 
-local function updateRow(row, r)
-    local d = C.DIFF[r.diff] or C.DIFF.easy
-    row.icon:SetTexture(r.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
-    row.name:SetText(r.name)
-    row.name:SetTextColor(d.color[1], d.color[2], d.color[3])
-    local cost, unknown, farm = C.RecipeCost(r)
-    local parts = { d.label }
-    parts[#parts + 1] = r.numAvailable > 0 and ("vyrobíš %d×"):format(r.numAvailable) or "chybí suroviny"
-    parts[#parts + 1] = C.CostText(cost, unknown, farm)
-    row.info:SetText(table.concat(parts, "  ·  "))
-    row.sel:SetShown(selected and selected.name == r.name or false)
+local function createSkillPage(p)
+    skill.empty = text(p, fontNormal, 0.75, 0.75, 0.75)
+    skill.empty:SetPoint("TOPLEFT", 4, -10)
+    skill.empty:SetWidth(W - 40)
+    skill.empty:SetText("Otevři okno profese (třeba Leatherworking) a Crafter ti poradí, co vyrobit, aby ti rostla dovednost.")
+
+    local lbl = text(p, fontSmall, 0.7, 0.7, 0.7)
+    lbl:SetPoint("TOPLEFT", 2, -4)
+    lbl:SetText("Doporučuju teď vyrobit")
+    skill.lbl = lbl
+
+    local card = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    card:SetPoint("TOPLEFT", 0, -20)
+    card:SetPoint("TOPRIGHT", 0, -20)
+    card:SetHeight(112)
+    card:SetBackdrop(BACKDROP)
+    card:SetBackdropColor(1, 1, 1, 0.04)
+    card:SetBackdropBorderColor(ACCENT[1], ACCENT[2], ACCENT[3], 0.7)
+    skill.card = card
+    card.icon = card:CreateTexture(nil, "ARTWORK")
+    card.icon:SetSize(36, 36)
+    card.icon:SetPoint("TOPLEFT", 10, -10)
+    card.name = text(card, fontBig)
+    card.name:SetPoint("TOPLEFT", card.icon, "TOPRIGHT", 10, -1)
+    card.name:SetPoint("RIGHT", -10, 0)
+    card.name:SetWordWrap(false)
+    card.chance = text(card, fontNormal)
+    card.chance:SetPoint("TOPLEFT", card.name, "BOTTOMLEFT", 0, -4)
+    card.info = text(card, fontSmall, 0.8, 0.8, 0.8)
+    card.info:SetPoint("TOPLEFT", card.icon, "BOTTOMLEFT", 0, -8)
+    card.info:SetPoint("RIGHT", -10, 0)
+    card.pick = button(card, (W - 60) / 2, "Vybrat v profesi")
+    card.pick:SetPoint("BOTTOMLEFT", 10, 10)
+    card.pick:SetScript("OnClick", function() if focus and provider then provider.select(focus) end end)
+    card.fill = button(card, (W - 60) / 2, "Doplnit suroviny")
+    card.fill:SetPoint("BOTTOMRIGHT", -10, 10)
+    card.fill:SetScript("OnClick", function()
+        if not focus then return end
+        setPlan(focus, piecesToMax(focus))
+        C.ShowMainTab(2)
+    end)
+    card.fill:SetScript("OnEnter", function(self)
+        showTip(self, { { "Doplnit suroviny" }, { "Naplánuje tolik kusů, kolik je potřeba do maxima dovednosti, a v záložce Co chybí ukáže, co ti chybí a kde to sehnat.", 0.8, 0.8, 0.8 } })
+    end)
+    card.fill:SetScript("OnLeave", hideTip)
+
+    local more = text(p, fontSmall, 0.7, 0.7, 0.7)
+    more:SetPoint("TOPLEFT", 2, -142)
+    more:SetText("Další recepty, které zvednou skill (klik = doporučit a vybrat)")
+    skill.more = more
+    skill.sf, skill.content = scrollArea(p, -160, 0)
+    skill.rows = {}
 end
 
-local function refreshPanel()
-    if not panel or not panel:IsShown() or not provider then return end
-    local name, rank, max = provider.line()
-    panel.rank, panel.max = tonumber(rank), tonumber(max)
-    local left = (panel.rank and panel.max) and (panel.max - panel.rank) or nil
-    panel.title:SetText(("Crafter – %s %s/%s%s"):format(name or "?", tostring(rank or "?"), tostring(max or "?"),
-        left and (left > 0 and ("  (zbývá %d)"):format(left) or "  (max – u trenéra se nauč další úroveň)") or ""))
-    local all = provider.recipes()
-    recipes = {}
-    for _, r in ipairs(all) do
-        local show = true
-        if CrafterDB.hideTrivial and r.diff == "trivial" then show = false end
-        if CrafterDB.onlyCraftable and r.numAvailable <= 0 then show = false end
-        if show then recipes[#recipes + 1] = r end
+function refreshSkill()
+    if not main or current ~= 1 then return end
+    updateHeader()
+    local list = skillRecipes()
+    local has = provider ~= nil and #list > 0
+    skill.empty:SetShown(not has)
+    skill.card:SetShown(has)
+    skill.lbl:SetShown(has)
+    skill.more:SetShown(has)
+    skill.sf:SetShown(has)
+    if provider and #list == 0 then
+        skill.empty:SetText(main.rank and main.max and main.rank >= main.max
+            and "Máš maximum dovednosti. U trenéra se nauč další úroveň profese."
+            or "Žádný recept, který znáš, ti teď dovednost nezvedne. U trenéra se nauč nové recepty.")
+    elseif not provider then
+        skill.empty:SetText("Otevři okno profese (třeba Leatherworking) a Crafter ti poradí, co vyrobit, aby ti rostla dovednost.")
     end
-    sortRecipes(recipes)
-    if selected then
-        local found
-        for _, r in ipairs(recipes) do if r.name == selected.name then found = r end end
-        selected = found
-    end
-    for i, r in ipairs(recipes) do
-        local row = rows[i]
-        if not row then
-            row = CreateFrame("Button", nil, panel.content)
-            row:SetHeight(34)
-            row:SetPoint("TOPLEFT", 0, -(i - 1) * 36)
-            row:SetPoint("RIGHT", panel.content, "RIGHT", 0, 0)
-            local hl = row:CreateTexture(nil, "HIGHLIGHT")
-            hl:SetAllPoints()
-            hl:SetColorTexture(1, 1, 1, 0.07)
-            row.sel = row:CreateTexture(nil, "BACKGROUND")
-            row.sel:SetAllPoints()
-            row.sel:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 0.18)
-            row.icon = row:CreateTexture(nil, "ARTWORK")
-            row.icon:SetSize(28, 28)
-            row.icon:SetPoint("LEFT", 2, 0)
-            row.name = text(row, fontNormal)
-            row.name:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, -1)
-            row.name:SetPoint("RIGHT", -4, 0)
-            row.name:SetJustifyH("LEFT")
-            row.name:SetWordWrap(false)
-            row.info = text(row, fontSmall, 0.75, 0.75, 0.75)
-            row.info:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
-            row.info:SetPoint("RIGHT", -4, 0)
-            row.info:SetJustifyH("LEFT")
-            row.info:SetWordWrap(false)
-            row:SetScript("OnClick", function(self)
-                selected = self.recipe
-                provider.select(self.recipe)
-                refreshPanel()
-                C.ShowDetail(self.recipe)
-            end)
-            row:SetScript("OnEnter", function(self)
-                local lines = { { self.recipe.name } }
-                for _, l in ipairs(reagentLines(self.recipe)) do lines[#lines + 1] = l end
-                lines[#lines + 1] = { " " }
-                lines[#lines + 1] = { "Klik = vybere recept v okně profese (hned můžeš dát Create) a vedle ukáže, jak suroviny sehnat.", 0.7, 0.7, 0.7 }
-                showTip(self, lines)
-            end)
-            row:SetScript("OnLeave", hideTip)
-            rows[i] = row
+    if not has then return end
+
+    -- doporučení: vybraný, jinak první v pořadí
+    local found
+    if focus then for _, r in ipairs(list) do if r.name == focus.name then found = r end end end
+    focus = found or list[1]
+    local d = C.DIFF[focus.diff] or C.DIFF.easy
+    local card = skill.card
+    card.icon:SetTexture(focus.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+    card.name:SetText(focus.name)
+    card.name:SetTextColor(d.color[1], d.color[2], d.color[3])
+    card.chance:SetText(d.label)
+    card.chance:SetTextColor(d.color[1], d.color[2], d.color[3])
+    local need = piecesToMax(focus)
+    local left = (main.rank and main.max) and (main.max - main.rank) or 0
+    card.info:SetText((focus.numAvailable > 0 and ("Máš suroviny na %d ks"):format(focus.numAvailable) or "Suroviny ti chybí")
+        .. (left > 0 and ("  ·  na +%d bodů potřebuješ asi %d ks"):format(left, need) or ""))
+    card.fill:SetText(("Doplnit suroviny (%d×)"):format(need))
+
+    local n = 0
+    for _, r in ipairs(list) do
+        if r ~= focus then
+            n = n + 1
+            local row = skill.rows[n]
+            if not row then
+                row = CreateFrame("Button", nil, skill.content)
+                row:SetHeight(24)
+                row.icon = row:CreateTexture(nil, "ARTWORK")
+                row.icon:SetSize(20, 20)
+                row.icon:SetPoint("LEFT", 2, 0)
+                row.name = text(row, fontNormal)
+                row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+                row.name:SetPoint("RIGHT", -110, 0)
+                row.name:SetWordWrap(false)
+                row.right = text(row, fontSmall, 0.75, 0.75, 0.75)
+                row.right:SetPoint("RIGHT", -4, 0)
+                row.right:SetJustifyH("RIGHT")
+                local hl = row:CreateTexture(nil, "HIGHLIGHT")
+                hl:SetAllPoints()
+                hl:SetColorTexture(1, 1, 1, 0.06)
+                row:SetScript("OnClick", function(self)
+                    focus = self.recipe
+                    if provider then provider.select(self.recipe) end
+                    refreshSkill()
+                end)
+                skill.rows[n] = row
+            end
+            local rd = C.DIFF[r.diff] or C.DIFF.easy
+            row.recipe = r
+            row.icon:SetTexture(r.icon)
+            row.name:SetText(r.name)
+            row.name:SetTextColor(rd.color[1], rd.color[2], rd.color[3])
+            row.right:SetText(rd.label .. (r.numAvailable > 0 and ("  ·  %d×"):format(r.numAvailable) or ""))
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", 0, -(n - 1) * 26)
+            row:SetPoint("RIGHT", skill.content, "RIGHT", 0, 0)
+            row:Show()
         end
-        row.recipe = r
-        updateRow(row, r)
+    end
+    for i = n + 1, #skill.rows do skill.rows[i]:Hide() end
+    skill.content:SetHeight(math.max(1, n * 26))
+end
+C.RefreshPanel = function() refreshSkill() end
+
+-------------------------------------------------------------------------------
+-- 2. Co chybí
+-------------------------------------------------------------------------------
+local need = {}
+
+local function createNeedPage(p)
+    need.sf, need.content = scrollArea(p, 0, 70)
+    need.rows = {}
+    need.status = text(p, fontNormal)
+    need.status:SetPoint("BOTTOMLEFT", 2, 42)
+    need.status:SetPoint("RIGHT", 0, 0)
+    need.status:SetWordWrap(false)
+    need.buy = button(p, W - 20, "Koupit, co chybí")
+    need.buy:SetPoint("BOTTOMLEFT", 0, 12)
+    need.buy:SetScript("OnClick", function() C.BuyFromList(); C_Timer.After(0.6, refreshNeed) end)
+    need.clear = button(p, 110, "Vyčistit")
+    need.clear:SetPoint("BOTTOMRIGHT", 0, 12)
+    need.clear:SetScript("OnClick", function() wipe(CrafterDB.list); refreshNeed() end)
+end
+
+local function needRow(i)
+    local row = need.rows[i]
+    if row then return row end
+    row = CreateFrame("Button", nil, need.content)
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(24, 24)
+    row.icon:SetPoint("TOPLEFT", 2, -3)
+    row.name = text(row, fontNormal)
+    row.name:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 8, 0)
+    row.name:SetPoint("RIGHT", -110, 0)
+    row.name:SetWordWrap(false)
+    row.right = text(row, fontNormal)
+    row.right:SetPoint("TOPRIGHT", -4, -3)
+    row.right:SetJustifyH("RIGHT")
+    row.sub = text(row, fontSmall, 0.7, 0.7, 0.7)
+    row.sub:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -3)
+    row.sub:SetPoint("RIGHT", -4, 0)
+    row.sub:SetWordWrap(false)
+    row.del = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+    row.del:SetSize(22, 18)
+    row.del:SetPoint("RIGHT", -2, 0)
+    row.del:SetText("X")
+    local hl = row:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetColorTexture(1, 1, 1, 0.05)
+    need.rows[i] = row
+    return row
+end
+
+function refreshNeed()
+    if not main or current ~= 2 then return end
+    updateHeader()
+    local n, y = 0, 0
+    local function add(h, fill)
+        n = n + 1
+        local row = needRow(n)
+        row:SetHeight(h)
+        row.del:Hide()
+        row.sub:SetText("")
+        row.right:SetText("")
+        row:SetScript("OnClick", nil)
+        row:SetScript("OnEnter", nil)
+        row:SetScript("OnLeave", nil)
+        row.icon:SetTexture(nil)
+        fill(row)
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 0, -y)
+        row:SetPoint("RIGHT", need.content, "RIGHT", 0, 0)
         row:Show()
+        y = y + h + 2
     end
-    for i = #recipes + 1, #rows do rows[i]:Hide() end
-    panel.content:SetHeight(math.max(1, #recipes * 36))
-    panel.empty:SetShown(#recipes == 0)
+    local function header(label)
+        add(20, function(row)
+            row.name:SetText(label)
+            row.name:SetTextColor(ACCENT[1], ACCENT[2], ACCENT[3])
+        end)
+    end
 
-    -- spodní část: vybraný recept
-    if selected then
-        panel.selName:SetText(selected.name)
-        local cost, unknown, farm = C.RecipeCost(selected)
-        panel.selCost:SetText(("%d× = %s"):format(qty, C.CostText(cost * qty, unknown, farm)))
-        panel.add:Enable()
+    if #CrafterDB.list == 0 then
+        header("Zatím nic neplánuješ")
+        add(44, function(row)
+            row.name:SetText("V záložce Na skill dej „Doplnit suroviny“.")
+            row.name:SetTextColor(0.8, 0.8, 0.8)
+            row.sub:SetText("Tady pak uvidíš, co ti chybí a kde to sehnat.")
+        end)
     else
-        panel.selName:SetText("Vyber recept v seznamu nahoře")
-        panel.selCost:SetText("")
-        panel.add:Disable()
-    end
-    panel.qtyText:SetText(qty)
-    panel.listBtn:SetText(("Nákupní seznam (%d)"):format(#CrafterDB.list))
-end
-C.RefreshPanel = refreshPanel
-
-local function createPanel()
-    panel = window("CrafterPanel", 340, 460)
-    panel:SetFrameStrata("HIGH")
-
-    local hideGray = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    hideGray:SetSize(22, 22)
-    hideGray:SetPoint("TOPLEFT", 8, -30)
-    hideGray:SetHitRectInsets(0, -130, 0, 0)
-    if hideGray.Text then hideGray.Text:SetText("") end
-    local l1 = text(panel, fontSmall)
-    l1:SetPoint("LEFT", hideGray, "RIGHT", 2, 0)
-    l1:SetText("Schovat šedé (nic nedají)")
-    hideGray:SetScript("OnClick", function(self) CrafterDB.hideTrivial = self:GetChecked() and true or false; refreshPanel() end)
-
-    local onlyCan = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    onlyCan:SetSize(22, 22)
-    onlyCan:SetPoint("TOPLEFT", 178, -30)
-    onlyCan:SetHitRectInsets(0, -130, 0, 0)
-    if onlyCan.Text then onlyCan.Text:SetText("") end
-    local l2 = text(panel, fontSmall)
-    l2:SetPoint("LEFT", onlyCan, "RIGHT", 2, 0)
-    l2:SetText("Jen co hned vyrobím")
-    onlyCan:SetScript("OnClick", function(self) CrafterDB.onlyCraftable = self:GetChecked() and true or false; refreshPanel() end)
-    panel:HookScript("OnShow", function()
-        hideGray:SetChecked(CrafterDB.hideTrivial)
-        onlyCan:SetChecked(CrafterDB.onlyCraftable)
-    end)
-
-    panel.sf, panel.content = scrollArea(panel, -56, 104)
-    panel.empty = text(panel.content, fontNormal, 0.6, 0.6, 0.6)
-    panel.empty:SetPoint("TOPLEFT", 6, -6)
-    panel.empty:SetWidth(280)
-    panel.empty:SetJustifyH("LEFT")
-    panel.empty:SetText("Žádný recept tu teď nezvedne dovednost. Zkus vypnout „Schovat šedé“, nebo se u trenéra nauč nové recepty.")
-
-    local sep = panel:CreateTexture(nil, "ARTWORK")
-    sep:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 0.4)
-    sep:SetPoint("BOTTOMLEFT", 8, 98)
-    sep:SetPoint("BOTTOMRIGHT", -8, 98)
-    sep:SetHeight(1)
-
-    panel.selName = text(panel, fontNormal, 1, 1, 1)
-    panel.selName:SetPoint("BOTTOMLEFT", 10, 76)
-    panel.selName:SetPoint("RIGHT", -10, 0)
-    panel.selName:SetJustifyH("LEFT")
-    panel.selName:SetWordWrap(false)
-
-    local ql = text(panel, fontNormal)
-    ql:SetPoint("BOTTOMLEFT", 10, 45)
-    ql:SetText("Kolik:")
-    local minus = czechButton(panel, 24, "-")
-    minus:SetPoint("BOTTOMLEFT", 56, 40)
-    panel.qtyText = text(panel, fontNormal, 1, 1, 1)
-    panel.qtyText:SetPoint("LEFT", minus, "RIGHT", 4, 0)
-    panel.qtyText:SetWidth(34)
-    local plus = czechButton(panel, 24, "+")
-    plus:SetPoint("LEFT", panel.qtyText, "RIGHT", 4, 0)
-    local function step(d)
-        local big = IsShiftKeyDown() and 10 or 1
-        qty = math.max(1, math.min(999, qty + d * big))
-        refreshPanel()
-    end
-    minus:SetScript("OnClick", function() step(-1) end)
-    plus:SetScript("OnClick", function() step(1) end)
-    -- „Na skill“: tolik kusů, kolik bodů chybí do maxima (oranžový recept = bod za každý kus)
-    local toMax = czechButton(panel, 64, "Na skill")
-    toMax:SetPoint("LEFT", plus, "RIGHT", 6, 0)
-    toMax:SetScript("OnClick", function()
-        if not panel.rank or not panel.max then return end
-        local need = panel.max - panel.rank
-        if selected and selected.diff == "medium" then need = math.ceil(need * 1.5) end
-        if selected and selected.diff == "easy" then need = need * 3 end
-        qty = math.max(1, math.min(999, need))
-        refreshPanel()
-    end)
-    toMax:SetScript("OnEnter", function(self)
-        showTip(self, { { "Na skill" }, { "Nastaví počet kusů, kolik bodů chybí do maxima dovednosti. Oranžový recept dá bod za každý kus, u žlutého a zeleného Crafter počítá víc kusů (body padají jen občas).", 0.8, 0.8, 0.8 } })
-    end)
-    toMax:SetScript("OnLeave", hideTip)
-    panel.selCost = text(panel, fontSmall, 0.8, 0.8, 0.8)
-    panel.selCost:SetPoint("LEFT", toMax, "RIGHT", 6, 0)
-    panel.selCost:SetPoint("RIGHT", -10, 0)
-    panel.selCost:SetJustifyH("LEFT")
-
-    panel.add = czechButton(panel, 150, "Přidat na seznam")
-    panel.add:SetPoint("BOTTOMLEFT", 10, 10)
-    panel.add:SetScript("OnClick", function()
-        if not selected then return end
-        C.AddToList(selected, qty)
-        C.Msg(("na seznamu: %s x%d"):format(selected.name, qty))
-        refreshPanel()
-        if refreshList then refreshList() end
-    end)
-    panel.listBtn = czechButton(panel, 160, "Nákupní seznam")
-    panel.listBtn:SetPoint("BOTTOMRIGHT", -10, 10)
-    panel.listBtn:SetScript("OnClick", function() C.ToggleList() end)
-    minus:HookScript("OnEnter", function(self) showTip(self, { { "Počet" }, { "Shift + klik = po deseti.", 0.8, 0.8, 0.8 } }) end)
-    minus:HookScript("OnLeave", hideTip)
-    plus:HookScript("OnEnter", function(self) showTip(self, { { "Počet" }, { "Shift + klik = po deseti.", 0.8, 0.8, 0.8 } }) end)
-    plus:HookScript("OnLeave", hideTip)
-end
-
-local function attachPanel()
-    provider = C.Provider()
-    if not provider then return end
-    if not panel then createPanel() end
-    local host = (provider.kind == "craft" and CraftFrame) or (provider.kind == "retail" and ProfessionsFrame) or TradeSkillFrame
-    panel:ClearAllPoints()
-    -- vedle okna jsou záložky pro přepínání profesí (asi 65 bodů) -> panel až za ně
-    panel:SetPoint("TOPLEFT", host, "TOPRIGHT", 70, 0)
-    panel:Show()
-    refreshPanel()
-end
-
--------------------------------------------------------------------------------
--- Okno „Suroviny“: po kliknutí na recept – co máš a jak zbytek sehnat
--------------------------------------------------------------------------------
-local detail, detailRecipe, blocks = nil, nil, {}
-
-local function block(i)
-    local b = blocks[i]
-    if b then return b end
-    b = CreateFrame("Frame", nil, detail.content)
-    b.icon = b:CreateTexture(nil, "ARTWORK")
-    b.icon:SetSize(30, 30)
-    b.icon:SetPoint("TOPLEFT", 2, -2)
-    b.name = text(b, fontNormal, 1, 1, 1)
-    b.name:SetPoint("TOPLEFT", b.icon, "TOPRIGHT", 8, -1)
-    b.name:SetPoint("RIGHT", -70, 0)
-    b.name:SetJustifyH("LEFT")
-    b.name:SetWordWrap(false)
-    b.count = text(b, fontSmall)
-    b.count:SetPoint("TOPLEFT", b.name, "BOTTOMLEFT", 0, -2)
-    b.how = text(b, fontSmall)
-    b.how:SetPoint("TOPLEFT", b.icon, "BOTTOMLEFT", 4, -4)
-    b.how:SetPoint("RIGHT", -6, 0)
-    b.how:SetJustifyH("LEFT")
-    b.how:SetSpacing(2)
-    b.map = czechButton(b, 62, "Mapa")
-    b.map:SetPoint("TOPRIGHT", -2, -4)
-    b.map:SetScript("OnClick", function(self) C.MapFor(self:GetParent().itemID, self:GetParent().itemName) end)
-    b.map:SetScript("OnEnter", function(self) showTip(self, { { "Mapa" }, { "Máš-li tuhle surovinu už nalezenou, otevře mapu Crafteru s tvými místy. Jinak dá značku k nejbližšímu obchodníkovi nebo místu, kde se sežene.", 0.8, 0.8, 0.8 } }) end)
-    b.map:SetScript("OnLeave", hideTip)
-    blocks[i] = b
-    return b
-end
-
-local function colorText(r, g, bl, s)
-    return ("|cff%02x%02x%02x%s|r"):format(r * 255, g * 255, bl * 255, s)
-end
-
-local function refreshDetail()
-    if not detail or not detail:IsShown() or not detailRecipe then return end
-    -- čerstvé počty (taška se mohla změnit)
-    if provider then
-        for _, r in ipairs(recipes) do if r.name == detailRecipe.name then detailRecipe = r end end
-    end
-    detail.title:SetText(detailRecipe.name)
-    local y = 0
-    for i, rg in ipairs(detailRecipe.reagents) do
-        local b = block(i)
-        b.itemID, b.itemName = rg.id, rg.name
-        b.icon:SetTexture(rg.icon)
-        b.name:SetText(rg.name or "?")
-        local ok = rg.have >= rg.need
-        b.count:SetText(ok and colorText(0.5, 1, 0.5, ("máš %d – stačí (potřeba %d)"):format(rg.have, rg.need))
-                            or colorText(1, 0.45, 0.45, ("máš %d, potřeba %d – chybí %d"):format(rg.have, rg.need, rg.need - rg.have)))
-        local lines = {}
-        for _, l in ipairs(rg.id and C.HowToGet(rg.id) or {}) do
-            local col = C.HOW_COLOR[l[1]] or { 0.8, 0.8, 0.8 }
-            lines[#lines + 1] = colorText(col[1], col[2], col[3], "• " .. l[2])
+        header("Plánuješ vyrobit")
+        for i, e in ipairs(CrafterDB.list) do
+            add(24, function(row)
+                row.icon:SetTexture(e.icon)
+                row.name:SetText(("%s  ×%d"):format(e.name, e.qty))
+                row.name:SetTextColor(1, 1, 1)
+                row.del:Show()
+                row.del:SetScript("OnClick", function() table.remove(CrafterDB.list, i); refreshNeed() end)
+                row:SetScript("OnClick", function() C.SelectRecipeByName(e.name) end)
+                row:SetScript("OnEnter", function(self) showTip(self, { { e.name }, { "Klik = vybrat v okně profese. X = odebrat z plánu.", 0.8, 0.8, 0.8 } }) end)
+                row:SetScript("OnLeave", hideTip)
+            end)
         end
-        -- přepočet: chybí vyráběná surovina (bar) -> kolik rudy je potřeba
-        if rg.id and rg.have < rg.need then
-            local raw = C.RawFor({ { id = rg.id, name = rg.name, missing = rg.need - rg.have } })
-            if #raw > 0 then
-                local parts = {}
-                for _, x in ipairs(raw) do
-                    parts[#parts + 1] = ("%d× %s (máš %d%s)"):format(x.need, x.name, x.have, x.missing > 0 and (", chybí " .. x.missing) or " – stačí")
-                end
-                table.insert(lines, 1, colorText(0.6, 0.8, 1, ("• Na %d chybějících potřebuješ: %s"):format(rg.need - rg.have, table.concat(parts, ", "))))
+
+        -- co chybí: suroviny receptů + přepočet (bar -> ruda)
+        local totals, raw = C.ListTotals()
+        local missing = {}
+        for _, t in ipairs(totals) do if t.missing > 0 then missing[#missing + 1] = t end end
+        for _, x in ipairs(raw or {}) do if x.missing > 0 then missing[#missing + 1] = x end end
+        if #missing == 0 then
+            header("Máš všechno – můžeš vyrábět")
+        else
+            header("Chybí ti (klik = ukázat na mapě)")
+            for _, t in ipairs(missing) do
+                add(40, function(row)
+                    row.icon:SetTexture(t.icon)
+                    row.name:SetText(t.name)
+                    row.name:SetTextColor(1, 1, 1)
+                    row.right:SetText(("chybí %d"):format(t.missing))
+                    row.right:SetTextColor(1, 0.45, 0.45)
+                    local how = C.HowToGet(t.id)
+                    local best = how and how[1] and how[1][2] or ""
+                    if t["for"] then best = "na " .. t["for"] .. " – " .. best end
+                    row.sub:SetText(best)
+                    row:SetScript("OnClick", function() C.MapFor(t.id, t.name) end)
+                    row:SetScript("OnEnter", function(self)
+                        local lines = { { t.name }, { ("Máš %d, potřeba %d, chybí %d."):format(t.have, t.need, t.missing), 0.8, 0.8, 0.8 } }
+                        if t["for"] then lines[#lines + 1] = { "Na výrobu: " .. t["for"], 0.6, 0.8, 1 } end
+                        for _, l in ipairs(how or {}) do
+                            local col = C.HOW_COLOR[l[1]] or { 0.8, 0.8, 0.8 }
+                            lines[#lines + 1] = { "• " .. l[2], col[1], col[2], col[3] }
+                        end
+                        lines[#lines + 1] = { "Klik = ukázat na mapě", 0.6, 0.6, 0.6 }
+                        showTip(self, lines)
+                    end)
+                    row:SetScript("OnLeave", hideTip)
+                end)
             end
         end
-        b.how:SetText(table.concat(lines, "\n"))
-        b:ClearAllPoints()
-        b:SetPoint("TOPLEFT", 0, -y)
-        b:SetPoint("RIGHT", detail.content, "RIGHT", 0, 0)
-        local h = 40 + (b.how:GetStringHeight() or 0) + 10
-        b:SetHeight(h)
-        b:Show()
-        y = y + h
     end
-    for i = #detailRecipe.reagents + 1, #blocks do blocks[i]:Hide() end
-    detail.content:SetHeight(math.max(1, y))
-end
-C.RefreshDetail = refreshDetail
+    for i = n + 1, #need.rows do need.rows[i]:Hide() end
+    need.content:SetHeight(math.max(1, y))
 
-function C.ShowDetail(r)
-    if not detail then
-        detail = window("CrafterDetail", 380, 460)
-        detail:SetFrameStrata("HIGH")
-        detail:SetToplevel(true)
-        detail.sf, detail.content = scrollArea(detail, -34, 44)
-        local legend = text(detail, fontSmall, 0.65, 0.65, 0.65)
-        legend:SetPoint("BOTTOMLEFT", 10, 14)
-        legend:SetPoint("RIGHT", -10, 0)
-        legend:SetJustifyH("LEFT")
-        legend:SetText("Kde co stáhneš, vytěžíš nebo natrháš, si Crafter pamatuje sám – uvidíš to na jeho mapě (pravý klik na ikonu u minimapy).")
+    -- dole: stav a nákup u obchodníka
+    need.clear:SetShown(#CrafterDB.list > 0)
+    local merchant = MerchantFrame and MerchantFrame:IsShown()
+    if merchant and #CrafterDB.list > 0 then
+        local plan, total = C.MerchantPlan()
+        need.buy:Show()
+        need.buy:SetWidth(W - 140)
+        need.buy:SetEnabled(#plan > 0)
+        need.buy:SetText(#plan > 0 and ("Koupit, co chybí (" .. C.Money(total) .. ")") or "Tady nic z toho neprodávají")
+        need.status:SetText("")
+    else
+        need.buy:Hide()
+        need.status:SetText(#CrafterDB.list > 0 and colorText(0.7, 0.7, 0.7, "U obchodníka tu bude tlačítko Koupit, co chybí.") or "")
     end
-    detailRecipe = r
-    detail:ClearAllPoints()
-    if panel and panel:IsShown() then detail:SetPoint("TOPLEFT", panel, "TOPRIGHT", 4, 0) else detail:SetPoint("CENTER") end
-    detail:Show()
-    refreshDetail()
+end
+C.RefreshList = function() refreshNeed() end
+
+-------------------------------------------------------------------------------
+-- Otevírání
+-------------------------------------------------------------------------------
+local function ensure()
+    if main then return end
+    createMain()
+    createSkillPage(pages[1])
+    createNeedPage(pages[2])
+    C.EmbedMap(pages[3])
 end
 
--- vybrat recept podle jména v otevřeném okně profese (z nákupního seznamu)
+C.EnsureMain = ensure
+
+-- tab = 1/2/3; bez čísla: Na skill u otevřené profese, jinak Co chybí
+function C.ToggleMain(tab)
+    ensure()
+    if main:IsShown() and (not tab or tab == current) then main:Hide() return end
+    C.ShowMainTab(tab or (C.Provider() and 1 or 2))
+end
+C.ToggleList = function() C.ToggleMain(2) end
+C.ShowDetail = function() end   -- staré okno Suroviny už není (vše je v záložkách)
+
+-- vybrat recept podle jména v otevřeném okně profese
 function C.SelectRecipeByName(name)
     provider = C.Provider()
     if not provider then C.Msg("otevri okno profese - pak recept vyberu.") return end
     for _, r in ipairs(provider.recipes()) do
         if r.name == name then
-            selected = r
             provider.select(r)
-            if panel and panel:IsShown() then refreshPanel() end
-            C.ShowDetail(r)
+            focus = r
             return
         end
     end
     C.Msg("tenhle recept v otevrene profesi neni.")
 end
 
--------------------------------------------------------------------------------
--- Nákupní seznam
--------------------------------------------------------------------------------
-local list, listRows = nil, {}
-
-local function listRow(i)
-    local row = listRows[i]
-    if row then return row end
-    row = CreateFrame("Button", nil, list.content)
-    row:RegisterForDrag("LeftButton")
-    row:SetScript("OnDragStart", function() list:StartMoving() end)
-    row:SetScript("OnDragStop", function() list.savePos() end)
-    row:SetHeight(22)
-    row:SetPoint("TOPLEFT", 0, -(i - 1) * 24)
-    row:SetPoint("RIGHT", list.content, "RIGHT", 0, 0)
-    local hl = row:CreateTexture(nil, "HIGHLIGHT")
-    hl:SetAllPoints()
-    hl:SetColorTexture(1, 1, 1, 0.06)
-    row.icon = row:CreateTexture(nil, "ARTWORK")
-    row.icon:SetSize(20, 20)
-    row.icon:SetPoint("LEFT", 2, 0)
-    row.name = text(row, fontNormal)
-    row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-    row.name:SetPoint("RIGHT", -110, 0)
-    row.name:SetJustifyH("LEFT")
-    row.name:SetWordWrap(false)
-    row.count = text(row, fontNormal)
-    row.count:SetPoint("RIGHT", -4, 0)
-    row.count:SetJustifyH("RIGHT")
-    row.del = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-    row.del:SetSize(22, 18)
-    row.del:SetPoint("RIGHT", -2, 0)
-    row.del:SetText("X")
-    listRows[i] = row
-    return row
-end
-
-function refreshList()
-    if not list or not list:IsShown() then return end
-    local n = 0
-    local function add(fill)
-        n = n + 1
-        local row = listRow(n)
-        row.del:Hide()
-        row:SetScript("OnEnter", nil)
-        row:SetScript("OnLeave", nil)
-        row:SetScript("OnClick", nil)
-        fill(row)
-        row:Show()
-    end
-    -- recepty
-    local header = function(label)
-        add(function(row)
-            row.icon:SetTexture(nil)
-            row.name:SetText(label)
-            row.name:SetTextColor(ACCENT[1], ACCENT[2], ACCENT[3])
-            row.count:SetText("")
-        end)
-    end
-    if #CrafterDB.list == 0 then
-        header("Seznam je prázdný")
-        add(function(row)
-            row.icon:SetTexture(nil)
-            row.name:SetText("Otevři profesi, vyber recept a dej „Přidat na seznam“.")
-            row.name:SetTextColor(0.6, 0.6, 0.6)
-            row.count:SetText("")
-        end)
-    else
-        header("Chci vyrobit")
-        for i, e in ipairs(CrafterDB.list) do
-            add(function(row)
-                row.icon:SetTexture(e.icon)
-                row.name:SetText(e.name)
-                row.name:SetTextColor(1, 1, 1)
-                row.count:SetText("")
-                row.del:Show()
-                row.del:SetScript("OnClick", function() C.RemoveFromList(i); refreshList(); if C.RefreshPanel then C.RefreshPanel() end end)
-                row.name:SetText(("%s  ×%d"):format(e.name, e.qty))
-                row:SetScript("OnClick", function() C.SelectRecipeByName(e.name) end)
-                row:SetScript("OnEnter", function(self)
-                    showTip(self, { { e.name }, { "Klik = vybrat recept v okně profese (musí být otevřené), pak stačí dát Create.", 0.8, 0.8, 0.8 } })
-                end)
-                row:SetScript("OnLeave", hideTip)
-            end)
-        end
-        header("Suroviny (máš / potřeba)")
-        local missingCost, unknown, farm = 0, false, false
-        local totals, raw = C.ListTotals()
-        for _, t in ipairs(totals) do
-            add(function(row)
-                row.icon:SetTexture(t.icon)
-                row.name:SetText(t.name)
-                local done = t.missing == 0
-                row.name:SetTextColor(done and 0.6 or 1, done and 1 or 1, done and 0.6 or 1)
-                row.count:SetText(("%d / %d"):format(t.have, t.need))
-                row.count:SetTextColor(done and 0.6 or 1, done and 1 or 0.4, done and 0.6 or 0.4)
-                row:SetScript("OnEnter", function(self)
-                    local lines = { { t.name }, { ("Máš %d (i v bance), potřeba %d, chybí %d."):format(t.have, t.need, t.missing), 0.8, 0.8, 0.8 } }
-                    if t.price then
-                        lines[#lines + 1] = { ("Viděno u %s: %s za kus"):format(CrafterDB.vendorName[t.id] or "?", C.Money(t.price)), 0.6, 1, 0.6 }
-                    end
-                    local src = C.SourceLines and C.SourceLines(t.id, 3)
-                    if src and #src > 0 then
-                        lines[#lines + 1] = { " " }
-                        lines[#lines + 1] = { "Kde sehnat:", ACCENT[1], ACCENT[2], ACCENT[3] }
-                        for _, l in ipairs(src) do
-                            local col = C.SOURCE_COLOR[l[1]]
-                            lines[#lines + 1] = { l[2], col[1], col[2], col[3] }
-                        end
-                        lines[#lines + 1] = { " " }
-                        lines[#lines + 1] = { "Klik = ukázat na mapě Crafteru", 0.7, 0.7, 0.7 }
-                    else
-                        lines[#lines + 1] = { "Kde ji sehnat, nevím (nová věc ve Forever, nebo jen z aukce).", 0.7, 0.7, 0.7 }
-                    end
-                    showTip(self, lines)
-                end)
-                row:SetScript("OnLeave", hideTip)
-                row:SetScript("OnClick", function() C.MapFor(t.id, t.name) end)
-            end)
-            if t.missing > 0 then
-                if t.price then missingCost = missingCost + t.price * t.missing elseif C.Farmable(t.id) then farm = true else unknown = true end
-            end
-        end
-        -- přepočet: na chybějící bary (a jiné vyráběné suroviny) je potřeba ruda…
-        if raw and #raw > 0 then
-            header("Na výrobu chybějících (máš / potřeba)")
-            for _, x in ipairs(raw) do
-                add(function(row)
-                    row.icon:SetTexture(x.icon)
-                    row.name:SetText(x.name)
-                    local done = x.missing == 0
-                    row.name:SetTextColor(done and 0.6 or 0.75, done and 1 or 0.85, done and 0.6 or 1)
-                    row.count:SetText(("%d / %d"):format(x.have, x.need))
-                    row.count:SetTextColor(done and 0.6 or 1, done and 1 or 0.4, done and 0.6 or 0.4)
-                    row:SetScript("OnEnter", function(self)
-                        showTip(self, { { x.name }, { ("Potřeba %d na výrobu: %s. Máš %d, chybí %d."):format(x.need, x["for"] or "?", x.have, x.missing), 0.8, 0.8, 0.8 },
-                                        { "Klik = ukázat na mapě Crafteru", 0.7, 0.7, 0.7 } })
-                    end)
-                    row:SetScript("OnLeave", hideTip)
-                    row:SetScript("OnClick", function() C.MapFor(x.id, x.name) end)
-                end)
-            end
-        end
-        local anyMissing = false
-        for _, t in ipairs(C.ListTotals()) do if t.missing > 0 then anyMissing = true end end
-        if not anyMissing then
-            list.total:SetText("|cff80ff80Máš všechny suroviny – můžeš vyrábět.|r")
-        else
-            list.total:SetText("Chybějící za " .. C.CostText(missingCost, unknown, farm))
+-- u okna profese: Crafter vedle něj (když ho hráč sám nepřesunul)
+local function attachToProfession()
+    ensure()
+    local p = C.Provider()
+    if not p then return end
+    if not CrafterDB.mainPos then
+        local host = (p.kind == "craft" and CraftFrame) or (p.kind == "retail" and ProfessionsFrame) or TradeSkillFrame
+        if host then
+            main:ClearAllPoints()
+            main:SetPoint("TOPLEFT", host, "TOPRIGHT", 70, 0)
         end
     end
-    if #CrafterDB.list == 0 then list.total:SetText("") end
-    for i = n + 1, #listRows do listRows[i]:Hide() end
-    list.content:SetHeight(math.max(1, n * 24))
-
-    -- nákup u obchodníka
-    if MerchantFrame and MerchantFrame:IsShown() then
-        local plan, total = C.MerchantPlan()
-        list.buy:SetShown(true)
-        list.buy:SetEnabled(#plan > 0)
-        local missingAny = false
-        for _, t in ipairs(C.ListTotals()) do if t.missing > 0 then missingAny = true end end
-        if #plan > 0 then list.buy:SetText("Koupit, co chybí (" .. C.Money(total) .. ")")
-        elseif not missingAny then list.buy:SetText("Nic nechybí")
-        else list.buy:SetText("To, co chybí, tu neprodávají") end
-    else
-        list.buy:Hide()
-    end
-end
-C.RefreshList = refreshList
-
-local function createList()
-    list = window("CrafterList", 340, 400)
-    -- poloha: uložená, jinak vlevo dole (mimo panel a okno Suroviny)
-    local pos = CrafterDB.listPos
-    if pos then list:SetPoint(pos[1], UIParent, pos[1], pos[2], pos[3]) else list:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 40, 120) end
-    list:SetFrameStrata("DIALOG")   -- nad panelem a oknem Suroviny
-    list:SetToplevel(true)
-    list:SetMovable(true)
-    list:RegisterForDrag("LeftButton")
-    list.savePos = function()
-        list:StopMovingOrSizing()
-        local p, _, _, x, y = list:GetPoint()
-        CrafterDB.listPos = { p, math.floor(x + 0.5), math.floor(y + 0.5) }
-    end
-    list:SetScript("OnDragStart", list.StartMoving)
-    list:SetScript("OnDragStop", list.savePos)
-    tinsert(UISpecialFrames, "CrafterList")
-    list.title:SetText("Crafter – nákupní seznam")
-    list.sf, list.content = scrollArea(list, -32, 76)
-    list.total = text(list, fontSmall, 0.9, 0.9, 0.9)
-    list.total:SetPoint("BOTTOMLEFT", 10, 58)
-    list.total:SetPoint("RIGHT", -10, 0)
-    list.total:SetJustifyH("LEFT")
-    list.buy = czechButton(list, 320, "Koupit tady")
-    list.buy:SetPoint("BOTTOM", 0, 32)
-    list.buy:SetScript("OnClick", function() C.BuyFromList(); C_Timer.After(0.6, refreshList) end)
-    local clear = czechButton(list, 150, "Vyčistit seznam")
-    clear:SetPoint("BOTTOMLEFT", 10, 8)
-    clear:SetScript("OnClick", function()
-        wipe(CrafterDB.list)
-        refreshList()
-        if C.RefreshPanel then C.RefreshPanel() end
-    end)
-    local close = czechButton(list, 110, "Zavřít")
-    close:SetPoint("BOTTOMRIGHT", -10, 8)
-    close:SetScript("OnClick", function() list:Hide() end)
-    list:SetScript("OnShow", refreshList)
-end
-
-function C.ToggleList(show)
-    if not list then createList() end
-    if show == nil then show = not list:IsShown() end
-    list:SetShown(show)
-    if show then list:Raise(); refreshList() end
+    main.autoOpened = not main:IsShown()
+    C.ShowMainTab(1)
 end
 
 -------------------------------------------------------------------------------
--- Ikona u minimapy: klik = nákupní seznam
+-- Ikona u minimapy: levý klik = Crafter, pravý = mapa
 -------------------------------------------------------------------------------
 local mm
 local function placeMinimap()
@@ -688,9 +589,7 @@ local function createMinimap()
     mm:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
     mm:RegisterForDrag("LeftButton")
     mm:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    mm:SetScript("OnClick", function(_, button)
-        if button == "RightButton" then C.ToggleMap() else C.ToggleList() end
-    end)
+    mm:SetScript("OnClick", function(_, b) if b == "RightButton" then C.ToggleMain(3) else C.ToggleMain() end end)
     mm:SetScript("OnDragStart", function(self)
         self:SetScript("OnUpdate", function()
             local mx, my = Minimap:GetCenter()
@@ -702,8 +601,8 @@ local function createMinimap()
     end)
     mm:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
     mm:SetScript("OnEnter", function(self)
-        showTip(self, { { "Crafter" }, { "Klik: nákupní seznam", 0.9, 0.9, 0.9 }, { "Pravý klik: mapa tvých nálezů", 0.9, 0.9, 0.9 },
-                        { "Panel „Co vyrobit“ se ukáže sám u okna profese.", 0.7, 0.7, 0.7 }, { "Tažením posuneš ikonu.", 0.7, 0.7, 0.7 } })
+        showTip(self, { { "Crafter" }, { "Levý klik: Crafter (Na skill / Co chybí)", 0.9, 0.9, 0.9 },
+                        { "Pravý klik: mapa tvých nálezů", 0.9, 0.9, 0.9 }, { "Tažením posuneš ikonu.", 0.7, 0.7, 0.7 } })
     end)
     mm:SetScript("OnLeave", hideTip)
     placeMinimap()
@@ -723,58 +622,58 @@ local ev = CreateFrame("Frame")
 for _, e in ipairs({ "PLAYER_LOGIN", "TRADE_SKILL_SHOW", "TRADE_SKILL_CLOSE", "TRADE_SKILL_UPDATE", "TRADE_SKILL_LIST_UPDATE",
                      "CRAFT_SHOW", "CRAFT_CLOSE", "CRAFT_UPDATE", "BAG_UPDATE", "MERCHANT_SHOW", "MERCHANT_CLOSED",
                      "MERCHANT_UPDATE", "SKILL_LINES_CHANGED" }) do
-    pcall(ev.RegisterEvent, ev, e)   -- některé události nemusí ve Forever existovat
+    pcall(ev.RegisterEvent, ev, e)
 end
 ev:SetScript("OnEvent", function(_, event)
-    if event == "PLAYER_LOGIN" then
-        createMinimap()
-        return
-    end
+    if event == "PLAYER_LOGIN" then createMinimap() return end
     if event == "TRADE_SKILL_SHOW" or event == "CRAFT_SHOW" then
-        C_Timer.After(0.1, attachPanel)
+        C_Timer.After(0.1, attachToProfession)
         return
     end
     if event == "TRADE_SKILL_CLOSE" or event == "CRAFT_CLOSE" then
         C_Timer.After(0.1, function()
-            -- druhé okno (Enchanting / ostatní) může být pořád otevřené
-            if C.Provider() then attachPanel() else if panel then panel:Hide() end; if detail then detail:Hide() end end
+            -- sám otevřený u profese a pořád na záložce Na skill -> zavřít s profesí
+            if main and main.autoOpened and current == 1 and not C.Provider() then main:Hide() end
+            if main and main:IsShown() then refreshSkill() end
         end)
         return
     end
     if event == "MERCHANT_SHOW" then
         C.ScanMerchant()
-        if #CrafterDB.list > 0 then C.ToggleList(true) end
-        refreshList()
+        -- něco z plánu tu prodávají -> ukázat Co chybí s tlačítkem Koupit
+        if #CrafterDB.list > 0 then
+            local plan = C.MerchantPlan()
+            if #plan > 0 then ensure(); C.ShowMainTab(2) end
+        end
         return
     end
     if event == "MERCHANT_UPDATE" then C.ScanMerchant() end
     later(function()
-        refreshPanel()
-        refreshList()
-        refreshDetail()
+        if not main or not main:IsShown() then return end
+        if current == 1 then refreshSkill() elseif current == 2 then refreshNeed() end
     end)
 end)
 
 SLASH_CRAFTER1 = "/crafter"
 SlashCmdList.CRAFTER = function(msg)
     msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-    if msg == "" or msg == "seznam" then C.ToggleList() return end
-    if msg == "vycistit" then wipe(CrafterDB.list); refreshList(); C.Msg("seznam vycisten.") return end
-    if msg == "mapa" then C.ToggleMap() return end
-    if msg == "sber" then C.Sber.Toggle() return end
+    if msg == "" then C.ToggleMain() return end
+    if msg == "mapa" then C.ToggleMain(3) return end
+    if msg == "seznam" or msg == "chybi" then C.ToggleMain(2) return end
     if msg == "ladit" then C.Sber.Debug() return end
-    if msg == "osy" then
-        CrafterDB.dbSwap = not CrafterDB.dbSwap
-        C.Sber.Rebuild()
-        C.Msg("mista z databaze: osy " .. (CrafterDB.dbSwap and "PROHOZENY" or "puvodni") .. ". Kdyz jsou tecky na mape mimo, prepni zpatky.")
-        return
-    end
-    if msg == "popisky" then CrafterDB.tooltip = CrafterDB.tooltip == false; C.Msg("kde sehnat v popiscich predmetu: " .. (CrafterDB.tooltip == false and "vypnuto" or "zapnuto")) return end
+    if msg == "sber" then C.Sber.Toggle() return end
+    if msg == "znacka" then C.ClearMap(); C.Msg("znacka na mape zrusena.") return end
+    if msg == "vycistit" then wipe(CrafterDB.list); if main then refreshNeed() end; C.Msg("plan vycisten.") return end
     if msg == "ceny" then
         local n = 0
         for _ in pairs(CrafterDB.prices) do n = n + 1 end
         C.Msg(("znam ceny %d surovin od obchodniku."):format(n))
         return
     end
-    C.Msg("/crafter = nakupni seznam, /crafter mapa = mapa tvych nalezu, /crafter znacka = zrusit znacku, /crafter vycistit, /crafter ceny, /crafter popisky. Panel Co vyrobit se ukaze sam u okna profese.")
+    if msg == "popisky" then
+        CrafterDB.tooltip = CrafterDB.tooltip == false
+        C.Msg("kde sehnat v popiscich predmetu: " .. (CrafterDB.tooltip == false and "vypnuto" or "zapnuto"))
+        return
+    end
+    C.Msg("/crafter = okno Crafteru, /crafter mapa, /crafter chybi, /crafter vycistit, /crafter ladit, /crafter popisky")
 end

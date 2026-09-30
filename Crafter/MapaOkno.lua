@@ -8,6 +8,7 @@ local win, canvas, tiles, pins, arrow = nil, nil, {}, {}, nil
 local overlays = {}   -- objevené části mapy
 local mapID, onlyItem, target, star
 local view, zoom = nil, 1   -- výřez mapy (ScrollFrame) a přiblížení 1–6×
+local host             -- rámeček záložky Mapa v hlavním okně (mapa je vložená do něj)
 
 local function fs(parent, size, r, g, b)
     local t = parent:CreateFontString(nil, "OVERLAY")
@@ -22,13 +23,20 @@ local function drawArt()
     local layers = C_Map.GetMapArtLayers and C_Map.GetMapArtLayers(mapID)
     local layer = layers and layers[1]
     local textures = C_Map.GetMapArtLayerTextures and C_Map.GetMapArtLayerTextures(mapID, 1)
-    local H = W * 2 / 3
-    if layer and layer.layerWidth and layer.layerWidth > 0 then H = W * layer.layerHeight / layer.layerWidth end
+    local ratio = 2 / 3
+    if layer and layer.layerWidth and layer.layerWidth > 0 then ratio = layer.layerHeight / layer.layerWidth end
+    if host then
+        -- vložená mapa: co nejširší, ale aby se vešla na výšku mezi horní a dolní ovládání
+        W = math.floor(math.min(host:GetWidth() - 20, (host:GetHeight() - 122) / ratio))
+    end
+    local H = W * ratio
     view:SetSize(W, H)
     canvas:SetSize(W * zoom, H * zoom)
-    win.sizing = true
-    win:SetSize(W + 20, H + 122)
-    win.sizing = false
+    if not host then
+        win.sizing = true
+        win:SetSize(W + 20, H + 122)
+        win.sizing = false
+    end
     for _, t in ipairs(overlays) do t:Hide() end
     if not layer or not textures then return end
     local cols = math.ceil(layer.layerWidth / layer.tileWidth)
@@ -307,7 +315,13 @@ local function cycle(step)
     show(list[idx])
 end
 
-local function create()
+local function create(parent)
+    if parent then
+        -- mapa vložená do záložky hlavního okna (bez vlastního rámu, zavírání a přesouvání)
+        win = CreateFrame("Frame", nil, parent)
+        win:SetAllPoints(parent)
+        win.savePos = function() end
+    else
     win = CreateFrame("Frame", "CrafterMapa", UIParent, "BackdropTemplate")
     win:Hide()
     -- poloha: uložená, jinak vpravo (mimo okna profese a Crafteru)
@@ -336,16 +350,17 @@ local function create()
     title:SetText("Crafter")
     local close = CreateFrame("Button", nil, win, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", 2, 2)
+    end
 
     -- zóna a přepínání
     local prev = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
     prev:SetSize(26, 22)
-    prev:SetPoint("TOPLEFT", 80, -6)
+    prev:SetPoint("TOPLEFT", parent and 8 or 80, -6)
     prev:SetText("<")
     prev:SetScript("OnClick", function() cycle(-1) end)
     local nextB = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
     nextB:SetSize(26, 22)
-    nextB:SetPoint("TOPRIGHT", -34, -6)
+    nextB:SetPoint("TOPRIGHT", parent and -8 or -34, -6)
     win.zone = fs(win, 13)
     win.zone:SetPoint("LEFT", prev, "RIGHT", 8, 0)
     win.zone:SetPoint("RIGHT", nextB, "LEFT", -8, 0)
@@ -438,7 +453,7 @@ local function create()
     canvas:EnableMouse(true)
     canvas:RegisterForDrag("LeftButton")
     canvas:SetScript("OnDragStart", function(self)
-        if zoom <= 1 then win:StartMoving() return end
+        if zoom <= 1 then if not parent then win:StartMoving() end return end
         local x, y = GetCursorPosition()
         self.drag = { x = x, y = y, sx = view:GetHorizontalScroll(), sy = view:GetVerticalScroll() }
         self:SetScript("OnUpdate", function(me)
@@ -512,7 +527,7 @@ local function create()
     -- sdílení nálezů s kamarády
     local share = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
     share:SetSize(64, 20)
-    share:SetPoint("BOTTOMRIGHT", -22, 8)
+    share:SetPoint("BOTTOMRIGHT", parent and -8 or -22, 8)
     share:SetNormalFontObject(CrafterFontButton)
     share:SetHighlightFontObject(CrafterFontButtonHl)
     share:SetText("Sdílet")
@@ -524,7 +539,8 @@ local function create()
     win.count:SetJustifyH("LEFT")
     win.count:SetWordWrap(false)
 
-    -- táhlo pro změnu velikosti (vpravo dole)
+    -- táhlo pro změnu velikosti (vpravo dole) – jen samostatné okno
+    if not parent then
     win:SetResizable(true)
     if win.SetResizeBounds then win:SetResizeBounds(400, 320, 1600, 1150) end
     local grip = CreateFrame("Button", nil, win)
@@ -550,6 +566,7 @@ local function create()
             end
         end)
     end)
+    end
     local mm = CreateFrame("CheckButton", nil, win, "UICheckButtonTemplate")
     mm:SetSize(22, 22)
     mm:SetPoint("BOTTOMLEFT", 146, 7)
@@ -576,8 +593,16 @@ local function create()
 end
 
 -- otevřít mapu: zone = mapa (nebo tvoje zóna), item = zvýraznit jen jeden předmět
+-- vložit mapu do záložky hlavního okna (volá Okno.lua)
+function C.EmbedMap(parent)
+    host = parent
+    if not win then create(parent) end
+end
+
 function C.OpenMap(zone, item, tg)
-    if CrafterDB.mapW then W = math.max(380, CrafterDB.mapW) end
+    if C.EnsureMain then C.EnsureMain() end   -- mapa žije v záložce hlavního okna
+    if host and C.ShowMainTab then C.ShowMainTab(3) end
+    if CrafterDB.mapW and not host then W = math.max(380, CrafterDB.mapW) end
     if not win then create() end
     onlyItem = item
     target = tg
@@ -590,7 +615,15 @@ function C.OpenMap(zone, item, tg)
 end
 
 function C.ToggleMap()
+    if host and C.ToggleMain then C.ToggleMain(3) return end
     if win and win:IsShown() then win:Hide() else C.OpenMap() end
+end
+
+-- záložka Mapa se ukázala -> překreslit (velikost záložky mohla být jiná)
+function C.MapTabShown()
+    if not win then return end
+    win.sync()
+    show(mapID or C_Map.GetBestMapForUnit("player"))
 end
 
 -- tlačítko Mapa u suroviny: tvoje nálezy -> vlastní mapa zóny s tou surovinou; jinak značka k nejbližšímu zdroji
