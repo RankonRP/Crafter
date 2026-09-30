@@ -1,0 +1,10 @@
+## Interface: 16001, 11507
+## Title: Crafter
+## Notes: Pomocnik profesi: co vyrobit pro dovednost, nakupni seznam, ceny u obchodniku
+## IconTexture: Interface\Icons\Trade_BlackSmithing
+## Author: salifox
+## Version: 0.1.0
+## SavedVariables: CrafterDB
+
+Data.lua
+Okno.lua
