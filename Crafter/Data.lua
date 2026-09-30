@@ -177,7 +177,19 @@ local RETAIL = {
         end
         return out
     end,
+    -- vybrat recept v okně profese (jako klik v jeho seznamu) -> hned jde dát Create
     select = function(r)
+        local info = C_TradeSkillUI.GetRecipeInfo(r.recipeID)
+        local page = ProfessionsFrame and ProfessionsFrame.CraftingPage
+        local list = page and page.RecipeList
+        if info and list and list.SelectRecipe then
+            -- když je recept skrytý hledáním / filtrem, nejdřív hledání smazat
+            local ok = pcall(list.SelectRecipe, list, info, true)
+            if ok then return end
+        end
+        if info and page and page.SelectRecipe then
+            if pcall(page.SelectRecipe, page, info) then return end
+        end
         if C_TradeSkillUI.OpenRecipe then pcall(C_TradeSkillUI.OpenRecipe, r.recipeID) end
     end,
 }

@@ -182,7 +182,7 @@ local function refreshPanel()
                 local lines = { { self.recipe.name } }
                 for _, l in ipairs(reagentLines(self.recipe)) do lines[#lines + 1] = l end
                 lines[#lines + 1] = { " " }
-                lines[#lines + 1] = { "Klik = vedle se ukáže, jak suroviny sehnat. Dole nastav počet a přidej na nákupní seznam.", 0.7, 0.7, 0.7 }
+                lines[#lines + 1] = { "Klik = vybere recept v okně profese (hned můžeš dát Create) a vedle ukáže, jak suroviny sehnat.", 0.7, 0.7, 0.7 }
                 showTip(self, lines)
             end)
             row:SetScript("OnLeave", hideTip)
@@ -417,6 +417,22 @@ function C.ShowDetail(r)
     refreshDetail()
 end
 
+-- vybrat recept podle jména v otevřeném okně profese (z nákupního seznamu)
+function C.SelectRecipeByName(name)
+    provider = C.Provider()
+    if not provider then C.Msg("otevri okno profese - pak recept vyberu.") return end
+    for _, r in ipairs(provider.recipes()) do
+        if r.name == name then
+            selected = r
+            provider.select(r)
+            if panel and panel:IsShown() then refreshPanel() end
+            C.ShowDetail(r)
+            return
+        end
+    end
+    C.Msg("tenhle recept v otevrene profesi neni.")
+end
+
 -------------------------------------------------------------------------------
 -- Nákupní seznam
 -------------------------------------------------------------------------------
@@ -495,6 +511,11 @@ function refreshList()
                 row.del:Show()
                 row.del:SetScript("OnClick", function() C.RemoveFromList(i); refreshList(); if C.RefreshPanel then C.RefreshPanel() end end)
                 row.name:SetText(("%s  ×%d"):format(e.name, e.qty))
+                row:SetScript("OnClick", function() C.SelectRecipeByName(e.name) end)
+                row:SetScript("OnEnter", function(self)
+                    showTip(self, { { e.name }, { "Klik = vybrat recept v okně profese (musí být otevřené), pak stačí dát Create.", 0.8, 0.8, 0.8 } })
+                end)
+                row:SetScript("OnLeave", hideTip)
             end)
         end
         header("Suroviny (máš / potřeba)")
