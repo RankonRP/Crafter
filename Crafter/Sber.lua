@@ -255,6 +255,16 @@ function S.Debug()
     local f = zone and mapFrame(zone)
     C.Msg(("zona: %s %s typ %s | ramec mapy: %s"):format(tostring(zone), info and info.name or "?", info and tostring(info.mapType) or "?",
         f and ("kontinent " .. tostring(f.cont) .. ", " .. math.floor(f.width) .. "x" .. math.floor(f.height) .. " yd") or "NENI"))
+    local nU = 0
+    for _ in pairs(Crafter_Uzly or {}) do nU = nU + 1 end
+    local s = CrafterDB.sber or {}
+    C.Msg(("data: Crafter_Uzly %s (%d druhu), Zdroje %s | nastaveni rudy=%s byliny=%s db=%s | nacteni %s %s"):format(
+        Crafter_Uzly and "ano" or "NE", nU, Crafter_Zdroje and "ano" or "NE", tostring(s.mining), tostring(s.herbs), tostring(s.db),
+        tostring(S.rebuilt), tostring(S.lastError or "")))
+    if not next(byMap) then
+        local okR, errR = pcall(S.Rebuild)
+        C.Msg("zkousim nacist znovu: " .. (okR and "ok" or ("CHYBA " .. tostring(errR))))
+    end
     local keys = {}
     for k, list in pairs(byMap) do keys[#keys + 1] = k .. "=" .. #list end
     C.Msg("body podle kontinentu: " .. (#keys > 0 and table.concat(keys, ", ") or "zadne"))
@@ -349,7 +359,9 @@ ev:SetScript("OnEvent", function(_, event, unit, a2, a3, a4)
         CrafterDB.sber = CrafterDB.sber or {}
         for k, v in pairs(SBER_DEFAULTS) do if CrafterDB.sber[k] == nil then CrafterDB.sber[k] = v end end
         CrafterDB.found = CrafterDB.found or {}
-        S.Rebuild()
+        local okR, errR = pcall(S.Rebuild)
+        if not okR then S.lastError = errR end
+        S.rebuilt = okR
         C_Timer.NewTicker(0.1, function() pcall(updateMinimap) end)
         if WorldMapFrame then
             WorldMapFrame:HookScript("OnShow", function() C_Timer.After(0, S.RefreshWorld) end)
