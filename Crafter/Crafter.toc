@@ -3,11 +3,12 @@
 ## Notes: Pomocnik profesi: co vyrobit pro dovednost, nakupni seznam, ceny u obchodniku
 ## IconTexture: Interface\Icons\Trade_BlackSmithing
 ## Author: salifox
-## Version: 0.3.1
+## Version: 0.4.0
 ## SavedVariables: CrafterDB
 
 Zdroje.lua
 Data.lua
 Mapa.lua
 Sber.lua
+MapaOkno.lua
 Okno.lua

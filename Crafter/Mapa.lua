@@ -186,112 +186,122 @@ local function allPoints(itemID, limit)
 end
 
 -------------------------------------------------------------------------------
--- Značka na mapě k nejbližšímu místu + tečky na mapě světa
+-- Jak surovinu získat – jednoduchá rada pro okno receptu
+-- vrací { { druh, text, body } }: druh "mine" (tvůj nález), "v" koupit, "s" stahování,
+-- "m" těžba, "h" bylinky, "d" padá z mobů, "c" výroba, "?" nevím
 -------------------------------------------------------------------------------
-function C.ShowOnMap(itemID, name)
-    CrafterDB.mapItem = itemID
-    CrafterDB.mapItemName = name
-    local pts = allPoints(itemID)
-    if #pts == 0 then C.Msg("pro tuhle surovinu nemam zadne misto na mape.") return end
+local function nearestOf(ptsList)
+    -- ptsList = { { jméno, body{mapa,x,y…} } } -> jméno, zóna nejbližšího místa (nebo prvního)
     local a, b, inst = C.PlayerWorld()
-    local best, bestD
-    for _, p in ipairs(pts) do
-        if a and p[2] == inst then
-            local d = (p[3] - a) ^ 2 + (p[4] - b) ^ 2
-            if not bestD or d < bestD then best, bestD = p, d end
+    local best, bestD, bestName
+    for _, e in ipairs(ptsList) do
+        local pts = e[2]
+        for i = 1, #pts, 3 do
+            local x, y = C.DbXY(pts[i + 1], pts[i + 2])
+            local d = (a and pts[i] == inst) and ((x - a) ^ 2 + (y - b) ^ 2) or 1e12
+            if not bestD or d < bestD then best, bestD, bestName = { pts[i], x, y }, d, e[1] end
         end
     end
-    best = best or pts[1]
-    local zoneName, zoneID, zx, zy = C.ZoneOf(best[2], best[3], best[4])
+    if not best then return nil end
+    local zone = C.ZoneOf(best[1], best[2], best[3])
+    return bestName, zone, best
+end
+
+function C.HowToGet(itemID)
+    local out = {}
+    local mine, f
+    if C.Sber then mine, f = C.Sber.Points(itemID) end
+    if mine and #mine > 0 then
+        local zones, order = {}, {}
+        for i = 1, #mine, 3 do
+            local z = C.ZoneOf(mine[i], mine[i + 1], mine[i + 2]) or "?"
+            if not zones[z] then zones[z] = 0; order[#order + 1] = z end
+            zones[z] = zones[z] + 1
+        end
+        local parts = {}
+        for i = 1, math.min(3, #order) do parts[i] = ("%s (%d×)"):format(order[i], zones[order[i]]) end
+        out[#out + 1] = { "mine", ("Tvoje místa (%s): %s"):format(C.KIND_NAME[f.t] or "sběr", table.concat(parts, ", ")) }
+    end
+    local z = Crafter_Zdroje and Crafter_Zdroje[itemID]
+    if z then
+        if z.v then
+            local list = {}
+            for _, id in ipairs(z.v) do local n = Crafter_NPC[id]; if n then list[#list + 1] = { n.n, n.p } end end
+            local name, zone = nearestOf(list)
+            out[#out + 1] = { "v", ("Kup u obchodníka – nejblíž %s (%s)%s"):format(name or "?", zone or "?", z.price and (", " .. C.Money(z.price) .. "/ks") or "") }
+        end
+        if z.s then
+            local list = {}
+            for _, id in ipairs(z.s) do local n = Crafter_NPC[id]; if n then list[#list + 1] = { n.n, n.p } end end
+            local name, zone = nearestOf(list)
+            out[#out + 1] = { "s", ("Získáš stahováním (Skinning) – třeba %s (%s)"):format(name or "?", zone or "?") }
+        end
+        if z.g then
+            local ore, herb = {}, {}
+            for _, g in ipairs(z.g) do
+                local o = Crafter_OBJ[g[1]]
+                if o then
+                    if o.n:find("Vein") or o.n:find("Deposit") then ore[#ore + 1] = { o.n, o.p } else herb[#herb + 1] = { o.n, o.p } end
+                end
+            end
+            if #ore > 0 then
+                local name, zone = nearestOf(ore)
+                out[#out + 1] = { "m", ("Vytěžíš (Mining) z %s – třeba v %s"):format(name or "?", zone or "?") }
+            end
+            if #herb > 0 then
+                local name, zone = nearestOf(herb)
+                out[#out + 1] = { "h", ("Natrháš (Herbalism): %s – třeba v %s"):format(name or "?", zone or "?") }
+            end
+        end
+        if z.d and #out == 0 then
+            local list = {}
+            for _, d in ipairs(z.d) do local n = Crafter_NPC[d[1]]; if n then list[#list + 1] = { n.n, n.p } end end
+            local name, zone = nearestOf(list)
+            out[#out + 1] = { "d", ("Padá z mobů – třeba %s (%s)"):format(name or "?", zone or "?") }
+        end
+        if z.c then out[#out + 1] = { "c", "Vyrobíš: " .. table.concat(z.c, ", ") } end
+    end
+    if #out == 0 then out[1] = { "?", "Nevím, kde se sežene (nová věc ve Forever?). Až ji získáš sběrem, Crafter si místo zapamatuje." } end
+    return out
+end
+
+C.HOW_COLOR = { mine = { 0.4, 1, 0.8 }, v = { 1, 0.82, 0.2 }, s = { 0.85, 0.55, 0.25 }, m = { 0.75, 0.75, 0.85 },
+                h = { 0.3, 1, 0.3 }, d = { 1, 0.4, 0.4 }, c = { 0.6, 0.8, 1 }, ["?"] = { 0.6, 0.6, 0.6 } }
+
+-------------------------------------------------------------------------------
+-- Značka na mapě: nejdřív k tvému nálezu, jinak k nejbližšímu obchodníkovi / místu z databáze
+-------------------------------------------------------------------------------
+function C.ShowOnMap(itemID, name)
+    local candidates = {}
+    local mine = C.Sber and C.Sber.Points(itemID)
+    if mine and #mine > 0 then
+        candidates[1] = { "tvuj nalez", mine, true }
+    else
+        for _, p in ipairs(allPoints(itemID)) do
+            candidates[#candidates + 1] = { p[5], { p[2], p[3], p[4] }, true }
+        end
+    end
+    if #candidates == 0 then C.Msg("pro tuhle surovinu nemam zadne misto.") return end
+    local list = {}
+    for _, c in ipairs(candidates) do list[#list + 1] = { c[1], c[2] } end
+    -- nálezy jsou v souřadnicích hry, databáze po C.DbXY – nearestOf je volá přes DbXY, u nálezů to nevadí, dokud osy nejsou prohozené
+    local who, zoneName, best = nearestOf(list)
+    if not best then return end
+    local _, zoneID, zx, zy = C.ZoneOf(best[1], best[2], best[3])
     if zoneID and zx and C_Map.SetUserWaypoint and UiMapPoint then
-        local ok = pcall(function()
+        pcall(function()
             C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(zoneID, zx, zy))
             if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then C_SuperTrack.SetSuperTrackedUserWaypoint(true) end
         end)
-        if ok then
-            C.Msg(("znacka na mape: %s - %s (%s %.0f, %.0f). Na mape sveta uvidis vsechna mista."):format(
-                name or "?", best[5] or "?", zoneName or "?", zx * 100, zy * 100))
-        end
+        C.Msg(("znacka na mape: %s - %s (%s %.0f, %.0f)"):format(name or "?", who or "?", zoneName or "?", zx * 100, zy * 100))
     else
-        C.Msg(("nejblizsi misto: %s (%s)"):format(best[5] or "?", zoneName or CONTINENT_NAMES[best[2]] or "?"))
+        C.Msg(("nejblizsi misto: %s (%s)"):format(who or "?", zoneName or "?"))
     end
-    if C.RefreshMapPins then C.RefreshMapPins() end
 end
 
 function C.ClearMap()
-    CrafterDB.mapItem = nil
     if C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
-    if C.RefreshMapPins then C.RefreshMapPins() end
 end
-
--- tečky na mapě světa pro vybranou surovinu
-local pins, pinFrame, legend = {}, nil, nil
-function C.RefreshMapPins()
-    if not WorldMapFrame or not WorldMapFrame.GetCanvas then return end
-    local canvas = WorldMapFrame:GetCanvas()
-    if not pinFrame then
-        pinFrame = CreateFrame("Frame", nil, canvas)
-        pinFrame:SetAllPoints()
-        pinFrame:SetFrameLevel(canvas:GetFrameLevel() + 20)
-        legend = CreateFrame("Button", nil, WorldMapFrame, "BackdropTemplate")
-        legend:SetSize(260, 22)
-        legend:SetPoint("TOP", WorldMapFrame.ScrollContainer or WorldMapFrame, "TOP", 0, -6)
-        legend:SetFrameStrata("HIGH")
-        legend:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
-        legend:SetBackdropColor(0, 0, 0, 0.75)
-        legend:SetBackdropBorderColor(0.9, 0.7, 0.3, 1)
-        legend.text = legend:CreateFontString(nil, "OVERLAY")
-        legend.text:SetFont("Interface\\AddOns\\Crafter\\Fonts\\cz.ttf", 11, "")
-        legend.text:SetPoint("CENTER")
-        legend:SetScript("OnClick", C.ClearMap)
-    end
-    for _, t in ipairs(pins) do t:Hide() end
-    local itemID = CrafterDB and CrafterDB.mapItem
-    legend:SetShown(itemID ~= nil)
-    if not itemID then return end
-    legend.text:SetText(("Crafter: %s  (klik = skrýt)"):format(CrafterDB.mapItemName or itemID))
-    local mapID = WorldMapFrame:GetMapID()
-    if not mapID then return end
-    local w, h = canvas:GetSize()
-    local scale = (WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.GetCanvasScale and WorldMapFrame.ScrollContainer:GetCanvasScale()) or 1
-    local size = math.max(6, 14 / scale)
-    local n = 0
-    for _, p in ipairs(allPoints(itemID)) do
-        local ok, _, pos = pcall(C_Map.GetMapPosFromWorldPos, p[2], vec(p[2], p[3], p[4]), mapID)
-        if ok and pos and pos.x >= 0 and pos.x <= 1 and pos.y >= 0 and pos.y <= 1 then
-            n = n + 1
-            local t = pins[n]
-            if not t then
-                t = pinFrame:CreateTexture(nil, "OVERLAY")
-                t:SetTexture("Interface\\Buttons\\WHITE8x8")
-                local mask = pinFrame:CreateMaskTexture()
-                mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-                mask:SetAllPoints(t)
-                t:AddMaskTexture(mask)
-                pins[n] = t
-            end
-            local col = C.SOURCE_COLOR[p[1]]
-            t:SetVertexColor(col[1], col[2], col[3], 0.9)
-            t:SetSize(size, size)
-            t:ClearAllPoints()
-            t:SetPoint("CENTER", pinFrame, "TOPLEFT", pos.x * w, -pos.y * h)
-            t:Show()
-        end
-    end
-end
-
--- mapa světa: překreslit při otevření a změně mapy
-local hooked
-local function hookMap()
-    if hooked or not WorldMapFrame then return end
-    hooked = true
-    WorldMapFrame:HookScript("OnShow", function() C_Timer.After(0, C.RefreshMapPins) end)
-    if WorldMapFrame.OnMapChanged then hooksecurefunc(WorldMapFrame, "OnMapChanged", function() C.RefreshMapPins() end) end
-    if EventRegistry and EventRegistry.RegisterCallback then
-        pcall(EventRegistry.RegisterCallback, EventRegistry, "MapCanvas.MapSet", function() C.RefreshMapPins() end, C)
-    end
-end
-
 -------------------------------------------------------------------------------
 -- Popisek předmětu kdekoli ve hře (taška, okno profese…): krátce, kde sehnat
 -- (herní popisek neumí č/ř/ů – texty bez háčků)
@@ -326,7 +336,6 @@ ev:SetScript("OnEvent", function(_, event)
                 pcall(addItemLines, tip, data and data.id)
             end)
         end
-        if WorldMapFrame then hookMap() end
     end
     C_Timer.After(2, function() pcall(calibrate) end)
 end)

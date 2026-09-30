@@ -173,12 +173,13 @@ local function refreshPanel()
                 selected = self.recipe
                 provider.select(self.recipe)
                 refreshPanel()
+                C.ShowDetail(self.recipe)
             end)
             row:SetScript("OnEnter", function(self)
                 local lines = { { self.recipe.name } }
                 for _, l in ipairs(reagentLines(self.recipe)) do lines[#lines + 1] = l end
                 lines[#lines + 1] = { " " }
-                lines[#lines + 1] = { "Klik = vybrat recept. Dole nastav počet a přidej na nákupní seznam.", 0.7, 0.7, 0.7 }
+                lines[#lines + 1] = { "Klik = vedle se ukáže, jak suroviny sehnat. Dole nastav počet a přidej na nákupní seznam.", 0.7, 0.7, 0.7 }
                 showTip(self, lines)
             end)
             row:SetScript("OnLeave", hideTip)
@@ -305,6 +306,96 @@ local function attachPanel()
     panel:SetPoint("TOPLEFT", host, "TOPRIGHT", 70, 0)
     panel:Show()
     refreshPanel()
+end
+
+-------------------------------------------------------------------------------
+-- Okno „Suroviny“: po kliknutí na recept – co máš a jak zbytek sehnat
+-------------------------------------------------------------------------------
+local detail, detailRecipe, blocks = nil, nil, {}
+
+local function block(i)
+    local b = blocks[i]
+    if b then return b end
+    b = CreateFrame("Frame", nil, detail.content)
+    b.icon = b:CreateTexture(nil, "ARTWORK")
+    b.icon:SetSize(30, 30)
+    b.icon:SetPoint("TOPLEFT", 2, -2)
+    b.name = text(b, fontNormal, 1, 1, 1)
+    b.name:SetPoint("TOPLEFT", b.icon, "TOPRIGHT", 8, -1)
+    b.name:SetPoint("RIGHT", -70, 0)
+    b.name:SetJustifyH("LEFT")
+    b.name:SetWordWrap(false)
+    b.count = text(b, fontSmall)
+    b.count:SetPoint("TOPLEFT", b.name, "BOTTOMLEFT", 0, -2)
+    b.how = text(b, fontSmall)
+    b.how:SetPoint("TOPLEFT", b.icon, "BOTTOMLEFT", 4, -4)
+    b.how:SetPoint("RIGHT", -6, 0)
+    b.how:SetJustifyH("LEFT")
+    b.how:SetSpacing(2)
+    b.map = czechButton(b, 62, "Mapa")
+    b.map:SetPoint("TOPRIGHT", -2, -4)
+    b.map:SetScript("OnClick", function(self) C.MapFor(self:GetParent().itemID, self:GetParent().itemName) end)
+    b.map:SetScript("OnEnter", function(self) showTip(self, { { "Mapa" }, { "Máš-li tuhle surovinu už nalezenou, otevře mapu Crafteru s tvými místy. Jinak dá značku k nejbližšímu obchodníkovi nebo místu, kde se sežene.", 0.8, 0.8, 0.8 } }) end)
+    b.map:SetScript("OnLeave", hideTip)
+    blocks[i] = b
+    return b
+end
+
+local function colorText(r, g, bl, s)
+    return ("|cff%02x%02x%02x%s|r"):format(r * 255, g * 255, bl * 255, s)
+end
+
+local function refreshDetail()
+    if not detail or not detail:IsShown() or not detailRecipe then return end
+    -- čerstvé počty (taška se mohla změnit)
+    if provider then
+        for _, r in ipairs(recipes) do if r.name == detailRecipe.name then detailRecipe = r end end
+    end
+    detail.title:SetText(detailRecipe.name)
+    local y = 0
+    for i, rg in ipairs(detailRecipe.reagents) do
+        local b = block(i)
+        b.itemID, b.itemName = rg.id, rg.name
+        b.icon:SetTexture(rg.icon)
+        b.name:SetText(rg.name or "?")
+        local ok = rg.have >= rg.need
+        b.count:SetText(ok and colorText(0.5, 1, 0.5, ("máš %d – stačí (potřeba %d)"):format(rg.have, rg.need))
+                            or colorText(1, 0.45, 0.45, ("máš %d, potřeba %d – chybí %d"):format(rg.have, rg.need, rg.need - rg.have)))
+        local lines = {}
+        for _, l in ipairs(rg.id and C.HowToGet(rg.id) or {}) do
+            local col = C.HOW_COLOR[l[1]] or { 0.8, 0.8, 0.8 }
+            lines[#lines + 1] = colorText(col[1], col[2], col[3], "• " .. l[2])
+        end
+        b.how:SetText(table.concat(lines, "\n"))
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", 0, -y)
+        b:SetPoint("RIGHT", detail.content, "RIGHT", 0, 0)
+        local h = 40 + (b.how:GetStringHeight() or 0) + 10
+        b:SetHeight(h)
+        b:Show()
+        y = y + h
+    end
+    for i = #detailRecipe.reagents + 1, #blocks do blocks[i]:Hide() end
+    detail.content:SetHeight(math.max(1, y))
+end
+C.RefreshDetail = refreshDetail
+
+function C.ShowDetail(r)
+    if not detail then
+        detail = window("CrafterDetail", 380, 460)
+        detail:SetFrameStrata("HIGH")
+        detail.sf, detail.content = scrollArea(detail, -34, 44)
+        local legend = text(detail, fontSmall, 0.65, 0.65, 0.65)
+        legend:SetPoint("BOTTOMLEFT", 10, 14)
+        legend:SetPoint("RIGHT", -10, 0)
+        legend:SetJustifyH("LEFT")
+        legend:SetText("Kde co stáhneš, vytěžíš nebo natrháš, si Crafter pamatuje sám – uvidíš to na jeho mapě (pravý klik na ikonu u minimapy).")
+    end
+    detailRecipe = r
+    detail:ClearAllPoints()
+    if panel and panel:IsShown() then detail:SetPoint("TOPLEFT", panel, "TOPRIGHT", 4, 0) else detail:SetPoint("CENTER") end
+    detail:Show()
+    refreshDetail()
 end
 
 -------------------------------------------------------------------------------
@@ -505,7 +596,7 @@ local function createMinimap()
     mm:RegisterForDrag("LeftButton")
     mm:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     mm:SetScript("OnClick", function(_, button)
-        if button == "RightButton" then C.Sber.Toggle() else C.ToggleList() end
+        if button == "RightButton" then C.ToggleMap() else C.ToggleList() end
     end)
     mm:SetScript("OnDragStart", function(self)
         self:SetScript("OnUpdate", function()
@@ -518,7 +609,7 @@ local function createMinimap()
     end)
     mm:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
     mm:SetScript("OnEnter", function(self)
-        showTip(self, { { "Crafter" }, { "Klik: nákupní seznam", 0.9, 0.9, 0.9 }, { "Pravý klik: sběr – rudy a byliny na mapě", 0.9, 0.9, 0.9 },
+        showTip(self, { { "Crafter" }, { "Klik: nákupní seznam", 0.9, 0.9, 0.9 }, { "Pravý klik: mapa tvých nálezů", 0.9, 0.9, 0.9 },
                         { "Panel „Co vyrobit“ se ukáže sám u okna profese.", 0.7, 0.7, 0.7 }, { "Tažením posuneš ikonu.", 0.7, 0.7, 0.7 } })
     end)
     mm:SetScript("OnLeave", hideTip)
@@ -553,7 +644,7 @@ ev:SetScript("OnEvent", function(_, event)
     if event == "TRADE_SKILL_CLOSE" or event == "CRAFT_CLOSE" then
         C_Timer.After(0.1, function()
             -- druhé okno (Enchanting / ostatní) může být pořád otevřené
-            if C.Provider() then attachPanel() elseif panel then panel:Hide() end
+            if C.Provider() then attachPanel() else if panel then panel:Hide() end; if detail then detail:Hide() end end
         end)
         return
     end
@@ -567,6 +658,7 @@ ev:SetScript("OnEvent", function(_, event)
     later(function()
         refreshPanel()
         refreshList()
+        refreshDetail()
     end)
 end)
 
@@ -575,13 +667,12 @@ SlashCmdList.CRAFTER = function(msg)
     msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
     if msg == "" or msg == "seznam" then C.ToggleList() return end
     if msg == "vycistit" then wipe(CrafterDB.list); refreshList(); C.Msg("seznam vycisten.") return end
-    if msg == "mapa" then C.ClearMap(); C.Msg("znacky na mape skryty.") return end
+    if msg == "mapa" then C.ToggleMap() return end
     if msg == "sber" then C.Sber.Toggle() return end
     if msg == "ladit" then C.Sber.Debug() return end
     if msg == "osy" then
         CrafterDB.dbSwap = not CrafterDB.dbSwap
         C.Sber.Rebuild()
-        if C.RefreshMapPins then C.RefreshMapPins() end
         C.Msg("mista z databaze: osy " .. (CrafterDB.dbSwap and "PROHOZENY" or "puvodni") .. ". Kdyz jsou tecky na mape mimo, prepni zpatky.")
         return
     end
@@ -592,5 +683,5 @@ SlashCmdList.CRAFTER = function(msg)
         C.Msg(("znam ceny %d surovin od obchodniku."):format(n))
         return
     end
-    C.Msg("/crafter = nakupni seznam, /crafter sber (rudy a byliny na mape), /crafter vycistit, /crafter ceny, /crafter mapa (skryt znacky), /crafter popisky, /crafter osy. Panel Co vyrobit se ukaze sam u okna profese.")
+    C.Msg("/crafter = nakupni seznam, /crafter mapa = mapa tvych nalezu, /crafter znacka = zrusit znacku, /crafter vycistit, /crafter ceny, /crafter popisky. Panel Co vyrobit se ukaze sam u okna profese.")
 end

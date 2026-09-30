@@ -263,10 +263,8 @@ s += "}\n-- Crafter_NPC[id] = { n = jméno, s = podtitul, l1/l2 = úroveň, p = 
 for (const [id, e] of Object.entries(npcOut)) s += "[" + id + "]=" + lua(e) + ",\n";
 s += "}\n-- Crafter_OBJ[id] = { n = jméno (bylina, žíla), p = {mapa,x,y…}, c = počet spawnů }\nCrafter_OBJ = {\n";
 for (const [id, e] of Object.entries(objOut)) s += "[" + id + "]=" + lua(e) + ",\n";
-s += "}\n-- Crafter_Uzly[objektID] = { n = jméno, t = \"m\" ruda / \"h\" bylina, i = hlavní předmět (ikonka), p = všechna místa {mapa,x,y…} }\nCrafter_Uzly = {\n";
-for (const [id, e] of Object.entries(nodeOut)) s += "[" + id + "]=" + lua(e) + ",\n";
 s += "}\n";
-console.log(`ložiska a byliny: ${Object.keys(nodeOut).length} druhů, ${nodePoints} míst`);
+// místa rud a bylin z databáze (nodeOut) se nepřibalují – mapa Crafteru ukazuje jen vlastní nálezy hráče
 const target = path.join(__dirname, "..", "Crafter", "Zdroje.lua");
 fs.writeFileSync(target, s);
 console.log(`hotovo: surovin se zdrojem ${Object.keys(out).length}, NPC ${Object.keys(npcOut).length}, objektů ${Object.keys(objOut).length}, ${Math.round(s.length / 1024)} kB`);

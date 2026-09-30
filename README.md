@@ -6,7 +6,8 @@ Pomocník profesí pro WoW: Forever.
 - **nákupní seznam**: sečte suroviny, ukáže co máš (i v bance) a co chybí
 - ceny u obchodníků se pamatují, u obchodníka jedním tlačítkem koupíš chybějící suroviny
 - **kde sehnat**: u každé suroviny prodejci, kořist z mobů, stahování, byliny a rudy – se zónou; klik = značka na mapě a tečky na mapě světa (data z CMaNGOS classic-db, `tools/zdroje.js`)
-- **sběr (jako Gatherer)**: ložiska rud a byliny na mapě zóny i na minimapě – 17 853 míst z databáze + tvoje vlastní nálezy (ukládají se samy, i v nových oblastech Forever); pravý klik na ikonu u minimapy nebo `/crafter sber`
+- **okno Suroviny**: klik na recept → u každé suroviny, kolik máš a jak ji sehnat (koupit, stahování, těžba, bylinky, mobové, výroba)
+- **mapa tvých nálezů** (jako Gatherer, ale jen tvoje): kde co stáhneš, vytěžíš, natrháš nebo chytíš, se uloží pod získaný předmět; vlastní okno mapy + minimapa; pravý klik na ikonu u minimapy nebo `/crafter mapa`
 - funguje pro všechny profese včetně Enchantingu
 
 Příkaz `/crafter` otevře nákupní seznam.
