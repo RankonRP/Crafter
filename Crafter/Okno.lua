@@ -105,7 +105,7 @@ local function reagentLines(r, times)
     for _, rg in ipairs(r.reagents) do
         local need = rg.need * times
         local ok = rg.have >= need
-        local price = rg.id and CrafterDB.prices[rg.id]
+        local price = C.PriceOf(rg.id)
         lines[#lines + 1] = { ("%d× %s  (máš %d)%s"):format(need, rg.name or "?", rg.have, price and ("  " .. C.Money(price) .. "/ks") or ""),
                               ok and 0.6 or 1, ok and 1 or 0.4, ok and 0.6 or 0.4 }
     end
@@ -117,10 +117,10 @@ local function updateRow(row, r)
     row.icon:SetTexture(r.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
     row.name:SetText(r.name)
     row.name:SetTextColor(d.color[1], d.color[2], d.color[3])
-    local cost, unknown = C.RecipeCost(r)
+    local cost, unknown, farm = C.RecipeCost(r)
     local parts = { d.label }
     parts[#parts + 1] = r.numAvailable > 0 and ("vyrobíš %d×"):format(r.numAvailable) or "chybí suroviny"
-    parts[#parts + 1] = C.CostText(cost, unknown)
+    parts[#parts + 1] = C.CostText(cost, unknown, farm)
     row.info:SetText(table.concat(parts, "  ·  "))
     row.sel:SetShown(selected and selected.name == r.name or false)
 end
@@ -128,7 +128,10 @@ end
 local function refreshPanel()
     if not panel or not panel:IsShown() or not provider then return end
     local name, rank, max = provider.line()
-    panel.title:SetText(("Crafter – %s %s/%s"):format(name or "?", tostring(rank or "?"), tostring(max or "?")))
+    panel.rank, panel.max = tonumber(rank), tonumber(max)
+    local left = (panel.rank and panel.max) and (panel.max - panel.rank) or nil
+    panel.title:SetText(("Crafter – %s %s/%s%s"):format(name or "?", tostring(rank or "?"), tostring(max or "?"),
+        left and (left > 0 and ("  (zbývá %d)"):format(left) or "  (max – u trenéra se nauč další úroveň)") or ""))
     local all = provider.recipes()
     recipes = {}
     for _, r in ipairs(all) do
@@ -196,8 +199,8 @@ local function refreshPanel()
     -- spodní část: vybraný recept
     if selected then
         panel.selName:SetText(selected.name)
-        local cost, unknown = C.RecipeCost(selected)
-        panel.selCost:SetText(("%d× = %s"):format(qty, C.CostText(cost * qty, unknown)))
+        local cost, unknown, farm = C.RecipeCost(selected)
+        panel.selCost:SetText(("%d× = %s"):format(qty, C.CostText(cost * qty, unknown, farm)))
         panel.add:Enable()
     else
         panel.selName:SetText("Vyber recept v seznamu nahoře")
@@ -273,8 +276,23 @@ local function createPanel()
     end
     minus:SetScript("OnClick", function() step(-1) end)
     plus:SetScript("OnClick", function() step(1) end)
+    -- „Na skill“: tolik kusů, kolik bodů chybí do maxima (oranžový recept = bod za každý kus)
+    local toMax = czechButton(panel, 64, "Na skill")
+    toMax:SetPoint("LEFT", plus, "RIGHT", 6, 0)
+    toMax:SetScript("OnClick", function()
+        if not panel.rank or not panel.max then return end
+        local need = panel.max - panel.rank
+        if selected and selected.diff == "medium" then need = math.ceil(need * 1.5) end
+        if selected and selected.diff == "easy" then need = need * 3 end
+        qty = math.max(1, math.min(999, need))
+        refreshPanel()
+    end)
+    toMax:SetScript("OnEnter", function(self)
+        showTip(self, { { "Na skill" }, { "Nastaví počet kusů, kolik bodů chybí do maxima dovednosti. Oranžový recept dá bod za každý kus, u žlutého a zeleného Crafter počítá víc kusů (body padají jen občas).", 0.8, 0.8, 0.8 } })
+    end)
+    toMax:SetScript("OnLeave", hideTip)
     panel.selCost = text(panel, fontSmall, 0.8, 0.8, 0.8)
-    panel.selCost:SetPoint("LEFT", plus, "RIGHT", 8, 0)
+    panel.selCost:SetPoint("LEFT", toMax, "RIGHT", 6, 0)
     panel.selCost:SetPoint("RIGHT", -10, 0)
     panel.selCost:SetJustifyH("LEFT")
 
@@ -476,7 +494,7 @@ function refreshList()
             end)
         end
         header("Suroviny (máš / potřeba)")
-        local missingCost, unknown = 0, false
+        local missingCost, unknown, farm = 0, false, false
         for _, t in ipairs(C.ListTotals()) do
             add(function(row)
                 row.icon:SetTexture(t.icon)
@@ -509,7 +527,7 @@ function refreshList()
                 row:SetScript("OnClick", function() if C.ShowOnMap then C.ShowOnMap(t.id, t.name) end end)
             end)
             if t.missing > 0 then
-                if t.price then missingCost = missingCost + t.price * t.missing else unknown = true end
+                if t.price then missingCost = missingCost + t.price * t.missing elseif C.Farmable(t.id) then farm = true else unknown = true end
             end
         end
         local anyMissing = false
@@ -517,7 +535,7 @@ function refreshList()
         if not anyMissing then
             list.total:SetText("|cff80ff80Máš všechny suroviny – můžeš vyrábět.|r")
         else
-            list.total:SetText("Chybějící za " .. C.CostText(missingCost, unknown))
+            list.total:SetText("Chybějící za " .. C.CostText(missingCost, unknown, farm))
         end
     end
     if #CrafterDB.list == 0 then list.total:SetText("") end

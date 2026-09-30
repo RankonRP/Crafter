@@ -219,19 +219,44 @@ function C.ScanMerchant()
 end
 
 -- cena jedné výroby: součet známých cen; unknown = true, když některou cenu neznáme
-function C.RecipeCost(r)
-    local total, unknown = 0, false
-    for _, rg in ipairs(r.reagents) do
-        local p = rg.id and CrafterDB.prices[rg.id]
-        if p then total = total + p * rg.need else unknown = true end
-    end
-    return total, unknown
+-- cena suroviny za kus: viděná u obchodníka, jinak cena obchodníka z databáze
+function C.PriceOf(id)
+    if not id then return nil end
+    local p = CrafterDB.prices[id]
+    if p then return p end
+    local z = Crafter_Zdroje and Crafter_Zdroje[id]
+    return z and z.v and z.price or nil
 end
 
--- cena k zobrazení: žádná známá = "cena ?", část neznámá = "12s + ?"
-function C.CostText(cost, unknown)
-    if unknown and (cost or 0) == 0 then return "cena ?" end
-    return C.Money(cost) .. (unknown and " + ?" or "")
+-- dá se surovina získat sběrem (stahování, těžba, bylinky, mobové, výroba)?
+local function farmable(id)
+    local z = id and Crafter_Zdroje and Crafter_Zdroje[id]
+    return z and (z.s or z.g or z.d or z.c) and true or false
+end
+
+C.Farmable = farmable
+
+-- cena jedné výroby: vrací součet, unknown (některá cena neznámá), farm (zbytek se sbírá)
+function C.RecipeCost(r)
+    local total, unknown, farm = 0, false, false
+    for _, rg in ipairs(r.reagents) do
+        local p = C.PriceOf(rg.id)
+        if p then total = total + p * rg.need
+        elseif farmable(rg.id) then farm = true
+        else unknown = true end
+    end
+    return total, unknown, farm
+end
+
+-- cena k zobrazení: "10c", "10c + sběr", "jen sběr", "cena ?"
+function C.CostText(cost, unknown, farm)
+    cost = cost or 0
+    if cost == 0 and farm and not unknown then return "jen sběr" end
+    if cost == 0 and unknown then return "cena ?" end
+    local s = C.Money(cost)
+    if farm then s = s .. " + sběr" end
+    if unknown then s = s .. " + ?" end
+    return s
 end
 
 function C.Money(copper)
@@ -272,7 +297,7 @@ function C.ListTotals()
     for id, n in pairs(need) do
         local have = GetItemCount(id, true) or 0
         out[#out + 1] = { id = id, name = CrafterDB.itemNames[id] or itemName(id) or ("#" .. id), icon = CrafterDB.itemIcons[id] or itemIcon(id),
-                          need = n, have = have, missing = math.max(0, n - have), price = CrafterDB.prices[id] }
+                          need = n, have = have, missing = math.max(0, n - have), price = C.PriceOf(id) }
     end
     table.sort(out, function(a, b)
         if (a.missing > 0) ~= (b.missing > 0) then return a.missing > 0 end

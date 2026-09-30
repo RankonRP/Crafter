@@ -119,6 +119,34 @@ local function toMap(f, map, x, y)
     return (dx * f.ux + dy * f.uy) / f.uu, (dx * f.vx + dy * f.vy) / f.vv
 end
 
+-- Sdílení nálezů: text "CRAFTER1:id,druh,mapa,x,y,mapa,x,y;id,…" (jen čísla a písmena – nic se nespouští)
+function S.Export()
+    local parts = {}
+    for id, f in pairs(CrafterDB.found) do
+        if type(id) == "number" and #f.p > 0 then
+            parts[#parts + 1] = id .. "," .. (f.t or "s") .. "," .. table.concat(f.p, ",")
+        end
+    end
+    return "CRAFTER1:" .. table.concat(parts, ";")
+end
+
+-- vrací počet nově přidaných míst, nebo nil + důvod
+function S.Import(text)
+    local body = (text or ""):gsub("%s+", ""):match("^CRAFTER1:(.*)$")
+    if not body then return nil, "to neni text z Crafteru (ma zacinat CRAFTER1:)" end
+    local before = S.FoundCount()
+    for entry in body:gmatch("[^;]+") do
+        local id, kind, rest = entry:match("^(%d+),([smhf]),([%-%d,]+)$")
+        if id then
+            local nums = {}
+            for n in rest:gmatch("%-?%d+") do nums[#nums + 1] = tonumber(n) end
+            for i = 1, #nums - 2, 3 do store(tonumber(id), kind, nil, nums[i], nums[i + 1], nums[i + 2]) end
+        end
+    end
+    S.RefreshWorld()
+    return S.FoundCount() - before
+end
+
 -- nálezy na dané mapě zóny: { { u, v, itemID, druh } } (u, v = 0..1); onlyItem = jen jeden předmět
 function S.OnMap(mapID, onlyItem)
     local out = {}
