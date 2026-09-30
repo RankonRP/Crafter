@@ -512,7 +512,13 @@ function refreshList()
                 if t.price then missingCost = missingCost + t.price * t.missing else unknown = true end
             end
         end
-        list.total:SetText("Chybějící za " .. C.Money(missingCost) .. (unknown and " + suroviny bez ceny" or ""))
+        local anyMissing = false
+        for _, t in ipairs(C.ListTotals()) do if t.missing > 0 then anyMissing = true end end
+        if not anyMissing then
+            list.total:SetText("|cff80ff80Máš všechny suroviny – můžeš vyrábět.|r")
+        else
+            list.total:SetText("Chybějící za " .. C.CostText(missingCost, unknown))
+        end
     end
     if #CrafterDB.list == 0 then list.total:SetText("") end
     for i = n + 1, #listRows do listRows[i]:Hide() end
@@ -523,7 +529,11 @@ function refreshList()
         local plan, total = C.MerchantPlan()
         list.buy:SetShown(true)
         list.buy:SetEnabled(#plan > 0)
-        list.buy:SetText(#plan > 0 and ("Koupit tady (" .. C.Money(total) .. ")") or "Tady nic ze seznamu není")
+        local missingAny = false
+        for _, t in ipairs(C.ListTotals()) do if t.missing > 0 then missingAny = true end end
+        if #plan > 0 then list.buy:SetText("Koupit, co chybí (" .. C.Money(total) .. ")")
+        elseif not missingAny then list.buy:SetText("Nic nechybí")
+        else list.buy:SetText("To, co chybí, tu neprodávají") end
     else
         list.buy:Hide()
     end
