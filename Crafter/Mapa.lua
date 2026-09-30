@@ -288,6 +288,7 @@ function C.ShowOnMap(itemID, name)
     local who, zoneName, best = nearestOf(list)
     if not best then return end
     local _, zoneID, zx, zy = C.ZoneOf(best[1], best[2], best[3])
+    C.lastTarget = { zoneID = zoneID, x = zx, y = zy, label = who, item = name }
     if zoneID and zx and C_Map.SetUserWaypoint and UiMapPoint then
         pcall(function()
             C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(zoneID, zx, zy))

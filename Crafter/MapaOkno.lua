@@ -5,7 +5,7 @@ local FONT = "Interface\\AddOns\\Crafter\\Fonts\\cz.ttf"
 local W = 640   -- šířka mapy v okně
 
 local win, canvas, tiles, pins, arrow = nil, nil, {}, {}, nil
-local mapID, onlyItem
+local mapID, onlyItem, target, star
 
 local function fs(parent, size, r, g, b)
     local t = parent:CreateFontString(nil, "OVERLAY")
@@ -79,7 +79,36 @@ local function drawPins()
     end
     local info = C_Map.GetMapInfo(mapID)
     win.zone:SetText((info and info.name or "?") .. (onlyItem and ("  –  jen " .. C.Sber.ItemName(onlyItem)) or ""))
-    win.count:SetText(n == 0 and "Tady zatím nemáš žádné nálezy. Stahuj, těž, trhej – Crafter si místa zapamatuje." or ("Nálezů na mapě: %d"):format(n))
+    -- hvězdička: kam jít pro surovinu, kterou ještě nemáš nalezenou
+    if not star then
+        star = CreateFrame("Frame", nil, canvas)
+        star:SetSize(24, 24)
+        star.tex = star:CreateTexture(nil, "OVERLAY")
+        star.tex:SetAllPoints()
+        star.tex:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
+        star:EnableMouse(true)
+        star:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(self.label or "?")
+            GameTooltip:AddLine("Crafter - sem pro " .. (self.item or "surovinu"), 0.9, 0.7, 0.3)
+            GameTooltip:Show()
+        end)
+        star:SetScript("OnLeave", GameTooltip_Hide)
+    end
+    if target and target.zoneID == mapID and target.x then
+        star.label, star.item = target.label, target.item
+        star:ClearAllPoints()
+        star:SetPoint("CENTER", canvas, "TOPLEFT", target.x * w, -target.y * h)
+        star:SetFrameLevel(canvas:GetFrameLevel() + 3)
+        star:Show()
+    else
+        star:Hide()
+    end
+    if n == 0 and target and target.zoneID == mapID then
+        win.count:SetText(("Zatím nenalezeno – hvězdička = nejbližší místo: %s. Na mapě hry máš značku."):format(target.label or "?"))
+    else
+        win.count:SetText(n == 0 and "Tady zatím nemáš žádné nálezy. Stahuj, těž, trhej – Crafter si místa zapamatuje." or ("Nálezů na mapě: %d"):format(n))
+    end
 end
 
 local function updateArrow()
@@ -174,7 +203,7 @@ local function create()
     all:SetNormalFontObject(CrafterFontButton)
     all:SetHighlightFontObject(CrafterFontButtonHl)
     all:SetText("Ukázat vše")
-    all:SetScript("OnClick", function() onlyItem = nil; drawPins() end)
+    all:SetScript("OnClick", function() onlyItem = nil; target = nil; drawPins() end)
 
     canvas = CreateFrame("Frame", nil, win)
     canvas:SetPoint("TOPLEFT", 10, -60)
@@ -203,9 +232,10 @@ local function create()
 end
 
 -- otevřít mapu: zone = mapa (nebo tvoje zóna), item = zvýraznit jen jeden předmět
-function C.OpenMap(zone, item)
+function C.OpenMap(zone, item, tg)
     if not win then create() end
     onlyItem = item
+    target = tg
     local id = zone or C_Map.GetBestMapForUnit("player")
     if not id then C.Msg("nevim, kde jsi - zkus to venku.") return end
     win:Show()
@@ -229,7 +259,11 @@ function C.MapFor(itemID, name)
         local _, zoneID = C.ZoneOf(pts[best], pts[best + 1], pts[best + 2])
         if zoneID then C.OpenMap(zoneID, itemID) return end
     end
+    -- ještě nenalezeno: značka + mapa Crafteru s hvězdičkou u nejbližšího obchodníka / místa
+    C.lastTarget = nil
     C.ShowOnMap(itemID, name)
+    local tg = C.lastTarget
+    if tg and tg.zoneID then C.OpenMap(tg.zoneID, itemID, tg) end
 end
 
 -- nový nález -> překreslit, když je mapa otevřená

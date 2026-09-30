@@ -187,7 +187,7 @@ for (const id of wanted) {
   const it = items[id];
   if (!it) continue;
   const e = {};
-  const vendors = [...(vendorIdx[id] || [])].filter(useNpc).slice(0, 10);
+  const vendors = [...(vendorIdx[id] || [])].filter(useNpc);   // všichni – nejbližšího vybírá addon podle polohy
   if (vendors.length) { e.v = vendors.map(Number); e.price = Math.round(it.buy / it.buyCount); }
 
   const mobs = (list, max) => {
@@ -196,12 +196,12 @@ for (const id of wanted) {
     return Object.entries(best).filter(([c]) => useNpc(c)).sort((a, b) => b[1] - a[1]).slice(0, max)
       .map(([c, ch]) => [Number(c), Math.round(ch * 10) / 10]);
   };
-  const drops = mobs(dropIdx[id], 8).filter(([, ch]) => ch >= 2);
+  const drops = mobs(dropIdx[id], 16).filter(([, ch]) => ch >= 2);
   if (drops.length) e.d = drops;
 
   const skinBest = {};
   for (const { entry, chance } of skinIdx[id] || []) for (const c of bySkin[entry] || []) skinBest[c] = Math.max(skinBest[c] || 0, chance);
-  const skins = Object.keys(skinBest).filter(useNpc).sort((a, b) => ct[a].min - ct[b].min).slice(0, 10);
+  const skins = Object.keys(skinBest).filter(useNpc).sort((a, b) => ct[a].min - ct[b].min).slice(0, 30);
   if (skins.length) e.s = skins.map(Number);
 
   const nodes = {};
