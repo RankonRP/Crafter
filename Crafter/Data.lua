@@ -315,6 +315,30 @@ function C.ListTotals()
         if (a.missing > 0) ~= (b.missing > 0) then return a.missing > 0 end
         return a.name < b.name
     end)
+    return out, C.RawFor(out)
+end
+
+-- Přepočet: chybějící vyráběné suroviny (bar) -> kolik jejich surovin (ruda) je potřeba
+-- missingList = { { id, missing } } ; vrací { { id, name, need, have, missing, for } } (for = "8× Copper Bar")
+function C.RawFor(missingList)
+    local need, forText = {}, {}
+    for _, t in ipairs(missingList) do
+        local z = Crafter_Zdroje and Crafter_Zdroje[t.id]
+        if t.missing > 0 and z and z.r then
+            for _, rg in ipairs(z.r) do
+                need[rg[1]] = (need[rg[1]] or 0) + rg[2] * t.missing
+                forText[rg[1]] = (forText[rg[1]] and (forText[rg[1]] .. ", ") or "") .. t.missing .. "× " .. (t.name or ("#" .. t.id))
+            end
+        end
+    end
+    local out = {}
+    for id, n in pairs(need) do
+        local have = GetItemCount(id, true) or 0
+        out[#out + 1] = { id = id, name = CrafterDB.itemNames[id] or itemName(id) or (Crafter_Zdroje[id] and Crafter_Zdroje[id].n) or ("#" .. id),
+                          icon = CrafterDB.itemIcons[id] or itemIcon(id), need = n, have = have, missing = math.max(0, n - have),
+                          price = C.PriceOf(id), ["for"] = forText[id] }
+    end
+    table.sort(out, function(a, b) return a.name < b.name end)
     return out
 end
 

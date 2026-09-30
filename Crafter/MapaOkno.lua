@@ -214,6 +214,85 @@ local function show(id)
     updateArrow()
 end
 
+-- Seznam všech zón (podle kontinentů) – klik přepne mapu
+local picker
+local CONTINENTS = { 1414, 1415 }   -- Kalimdor, Eastern Kingdoms (+ kontinent, kde právě jsi)
+function C.ToggleZonePicker()
+    if picker and picker:IsShown() then picker:Hide() return end
+    if not picker then
+        picker = CreateFrame("Frame", nil, win, "BackdropTemplate")
+        picker:SetSize(260, 380)
+        picker:SetPoint("TOP", win, "TOP", 0, -30)
+        picker:SetFrameStrata("FULLSCREEN_DIALOG")
+        picker:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+        picker:SetBackdropColor(0.02, 0.02, 0.02, 0.97)
+        picker:SetBackdropBorderColor(0.9, 0.7, 0.3, 1)
+        picker:EnableMouse(true)
+        local sf = CreateFrame("ScrollFrame", nil, picker, "UIPanelScrollFrameTemplate")
+        sf:SetPoint("TOPLEFT", 6, -6)
+        sf:SetPoint("BOTTOMRIGHT", -26, 6)
+        picker.content = CreateFrame("Frame", nil, sf)
+        picker.content:SetSize(220, 10)
+        sf:SetScrollChild(picker.content)
+        picker.rows = {}
+    end
+    -- kontinenty: Kalimdor, Eastern Kingdoms a ten, kde právě jsi (Forever může mít nové)
+    local conts, seen = {}, {}
+    local here = C_Map.GetBestMapForUnit("player")
+    local id = here
+    for _ = 1, 5 do
+        local info = id and C_Map.GetMapInfo(id)
+        if not info then break end
+        if info.mapType == 2 then if not seen[info.mapID] then conts[#conts + 1] = info.mapID; seen[info.mapID] = true end break end
+        id = info.parentMapID
+    end
+    for _, c in ipairs(CONTINENTS) do if not seen[c] and C_Map.GetMapInfo(c) then conts[#conts + 1] = c; seen[c] = true end end
+    local finds = {}
+    for _, z in ipairs(C.Sber.ZonesWithFinds()) do finds[z[1]] = z[3] end
+
+    local n, y = 0, 0
+    local function row(text, r, g, b, onClick)
+        n = n + 1
+        local btn = picker.rows[n]
+        if not btn then
+            btn = CreateFrame("Button", nil, picker.content)
+            btn:SetSize(220, 18)
+            btn.text = fs(btn, 12)
+            btn.text:SetPoint("LEFT", 4, 0)
+            btn.text:SetJustifyH("LEFT")
+            local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(1, 0.8, 0.3, 0.15)
+            picker.rows[n] = btn
+        end
+        btn.text:SetText(text)
+        btn.text:SetTextColor(r, g, b)
+        btn:SetScript("OnClick", onClick)
+        btn:EnableMouse(onClick ~= nil)
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", 0, -y)
+        btn:Show()
+        y = y + 19
+    end
+    for _, cont in ipairs(conts) do
+        local cinfo = C_Map.GetMapInfo(cont)
+        row(cinfo and cinfo.name or ("#" .. cont), 0.9, 0.7, 0.3, nil)
+        local zones = C_Map.GetMapChildrenInfo and C_Map.GetMapChildrenInfo(cont, 3) or {}
+        table.sort(zones, function(a, b) return a.name < b.name end)
+        for _, z in ipairs(zones) do
+            local cnt = finds[z.mapID]
+            local mid = z.mapID
+            row("   " .. z.name .. (cnt and ("  (" .. cnt .. ")") or ""), cnt and 0.5 or 0.85, cnt and 1 or 0.85, cnt and 0.6 or 0.85, function()
+                picker:Hide()
+                show(mid)
+            end)
+        end
+    end
+    for i = n + 1, #picker.rows do picker.rows[i]:Hide() end
+    picker.content:SetHeight(math.max(1, y))
+    picker:Show()
+end
+
 -- přepínání mezi zónami s nálezy (a tvou zónou)
 local function cycle(step)
     local zones = C.Sber.ZonesWithFinds()
@@ -272,6 +351,20 @@ local function create()
     win.zone:SetPoint("RIGHT", nextB, "LEFT", -8, 0)
     win.zone:SetJustifyH("CENTER")
     win.zone:SetWordWrap(false)
+    -- klik na název zóny = seznam všech zón
+    local zoneBtn = CreateFrame("Button", nil, win)
+    zoneBtn:SetPoint("TOPLEFT", win.zone, "TOPLEFT", 0, 4)
+    zoneBtn:SetPoint("BOTTOMRIGHT", win.zone, "BOTTOMRIGHT", 0, -4)
+    local zhl = zoneBtn:CreateTexture(nil, "HIGHLIGHT")
+    zhl:SetAllPoints()
+    zhl:SetColorTexture(1, 0.8, 0.3, 0.15)
+    zoneBtn:SetScript("OnClick", function() C.ToggleZonePicker() end)
+    zoneBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Klik = vybrat zonu")
+        GameTooltip:Show()
+    end)
+    zoneBtn:SetScript("OnLeave", GameTooltip_Hide)
     nextB:SetText(">")
     nextB:SetScript("OnClick", function() cycle(1) end)
 

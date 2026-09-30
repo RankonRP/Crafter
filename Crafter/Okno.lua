@@ -384,6 +384,17 @@ local function refreshDetail()
             local col = C.HOW_COLOR[l[1]] or { 0.8, 0.8, 0.8 }
             lines[#lines + 1] = colorText(col[1], col[2], col[3], "• " .. l[2])
         end
+        -- přepočet: chybí vyráběná surovina (bar) -> kolik rudy je potřeba
+        if rg.id and rg.have < rg.need then
+            local raw = C.RawFor({ { id = rg.id, name = rg.name, missing = rg.need - rg.have } })
+            if #raw > 0 then
+                local parts = {}
+                for _, x in ipairs(raw) do
+                    parts[#parts + 1] = ("%d× %s (máš %d%s)"):format(x.need, x.name, x.have, x.missing > 0 and (", chybí " .. x.missing) or " – stačí")
+                end
+                table.insert(lines, 1, colorText(0.6, 0.8, 1, ("• Na %d chybějících potřebuješ: %s"):format(rg.need - rg.have, table.concat(parts, ", "))))
+            end
+        end
         b.how:SetText(table.concat(lines, "\n"))
         b:ClearAllPoints()
         b:SetPoint("TOPLEFT", 0, -y)
@@ -520,7 +531,8 @@ function refreshList()
         end
         header("Suroviny (máš / potřeba)")
         local missingCost, unknown, farm = 0, false, false
-        for _, t in ipairs(C.ListTotals()) do
+        local totals, raw = C.ListTotals()
+        for _, t in ipairs(totals) do
             add(function(row)
                 row.icon:SetTexture(t.icon)
                 row.name:SetText(t.name)
@@ -553,6 +565,26 @@ function refreshList()
             end)
             if t.missing > 0 then
                 if t.price then missingCost = missingCost + t.price * t.missing elseif C.Farmable(t.id) then farm = true else unknown = true end
+            end
+        end
+        -- přepočet: na chybějící bary (a jiné vyráběné suroviny) je potřeba ruda…
+        if raw and #raw > 0 then
+            header("Na výrobu chybějících (máš / potřeba)")
+            for _, x in ipairs(raw) do
+                add(function(row)
+                    row.icon:SetTexture(x.icon)
+                    row.name:SetText(x.name)
+                    local done = x.missing == 0
+                    row.name:SetTextColor(done and 0.6 or 0.75, done and 1 or 0.85, done and 0.6 or 1)
+                    row.count:SetText(("%d / %d"):format(x.have, x.need))
+                    row.count:SetTextColor(done and 0.6 or 1, done and 1 or 0.4, done and 0.6 or 0.4)
+                    row:SetScript("OnEnter", function(self)
+                        showTip(self, { { x.name }, { ("Potřeba %d na výrobu: %s. Máš %d, chybí %d."):format(x.need, x["for"] or "?", x.have, x.missing), 0.8, 0.8, 0.8 },
+                                        { "Klik = ukázat na mapě Crafteru", 0.7, 0.7, 0.7 } })
+                    end)
+                    row:SetScript("OnLeave", hideTip)
+                    row:SetScript("OnClick", function() C.MapFor(x.id, x.name) end)
+                end)
             end
         end
         local anyMissing = false
