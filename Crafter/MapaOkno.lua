@@ -2,9 +2,10 @@
 -- Obrázek mapy skládáme z dlaždic, které hra dává (C_Map.GetMapArtLayerTextures).
 local C = Crafter
 local FONT = "Interface\\AddOns\\Crafter\\Fonts\\cz.ttf"
-local W = 640   -- šířka mapy v okně
+local W = 640   -- šířka mapy v okně (mění se táhlem, pamatuje se v CrafterDB.mapW)
 
 local win, canvas, tiles, pins, arrow = nil, nil, {}, {}, nil
+local overlays = {}   -- objevené části mapy
 local mapID, onlyItem, target, star
 
 local function fs(parent, size, r, g, b)
@@ -23,7 +24,10 @@ local function drawArt()
     local H = W * 2 / 3
     if layer and layer.layerWidth and layer.layerWidth > 0 then H = W * layer.layerHeight / layer.layerWidth end
     canvas:SetSize(W, H)
+    win.sizing = true
     win:SetSize(W + 20, H + 96)
+    win.sizing = false
+    for _, t in ipairs(overlays) do t:Hide() end
     if not layer or not textures then return end
     local cols = math.ceil(layer.layerWidth / layer.tileWidth)
     local k = W / layer.layerWidth
@@ -36,6 +40,48 @@ local function drawArt()
         t:ClearAllPoints()
         t:SetPoint("TOPLEFT", canvas, "TOPLEFT", col * layer.tileWidth * k, -row * layer.tileHeight * k)
         t:Show()
+    end
+
+    -- objevené části zóny (vesnice, údolí…) – stejně jako je kreslí mapa hry
+    local explored = C_MapExplorationInfo and C_MapExplorationInfo.GetExploredMapTextures and C_MapExplorationInfo.GetExploredMapTextures(mapID)
+    local n = 0
+    for _, info in ipairs(explored or {}) do
+        if not info.isShownByMouseOver then
+            local wide = math.ceil(info.textureWidth / 256)
+            local tall = math.ceil(info.textureHeight / 256)
+            local idx = 0
+            for j = 1, tall do
+                local ph, fh = 256, 256
+                if j == tall then
+                    ph = info.textureHeight % 256
+                    if ph == 0 then ph = 256 end
+                    fh = 16
+                    while fh < ph do fh = fh * 2 end
+                end
+                for i = 1, wide do
+                    idx = idx + 1
+                    local pw, fw = 256, 256
+                    if i == wide then
+                        pw = info.textureWidth % 256
+                        if pw == 0 then pw = 256 end
+                        fw = 16
+                        while fw < pw do fw = fw * 2 end
+                    end
+                    local fileID = info.fileDataIDs and info.fileDataIDs[idx]
+                    if fileID then
+                        n = n + 1
+                        local t = overlays[n]
+                        if not t then t = canvas:CreateTexture(nil, "BORDER"); overlays[n] = t end
+                        t:SetTexture(fileID)
+                        t:SetTexCoord(0, pw / fw, 0, ph / fh)
+                        t:SetSize(pw * k, ph * k)
+                        t:ClearAllPoints()
+                        t:SetPoint("TOPLEFT", canvas, "TOPLEFT", (info.offsetX + 256 * (i - 1)) * k, -(info.offsetY + 256 * (j - 1)) * k)
+                        t:Show()
+                    end
+                end
+            end
+        end
     end
 end
 
@@ -213,9 +259,29 @@ local function create()
 
     win.count = fs(win, 11, 0.75, 0.75, 0.75)
     win.count:SetPoint("BOTTOMLEFT", 10, 12)
+    win.count:SetPoint("RIGHT", win, "RIGHT", -170, 0)
+    win.count:SetJustifyH("LEFT")
+    win.count:SetWordWrap(false)
+
+    -- táhlo pro změnu velikosti (vpravo dole)
+    win:SetResizable(true)
+    if win.SetResizeBounds then win:SetResizeBounds(420, 330, 1600, 1150) end
+    local grip = CreateFrame("Button", nil, win)
+    grip:SetSize(16, 16)
+    grip:SetPoint("BOTTOMRIGHT", -2, 2)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:SetScript("OnMouseDown", function() win:StartSizing("BOTTOMRIGHT") end)
+    grip:SetScript("OnMouseUp", function()
+        win:StopMovingOrSizing()
+        W = math.floor(math.max(400, math.min(1580, win:GetWidth() - 20)))
+        CrafterDB.mapW = W
+        if mapID then drawArt(); drawPins() end
+    end)
     local mm = CreateFrame("CheckButton", nil, win, "UICheckButtonTemplate")
     mm:SetSize(22, 22)
-    mm:SetPoint("BOTTOMRIGHT", -150, 8)
+    mm:SetPoint("BOTTOMRIGHT", -140, 8)
     mm:SetHitRectInsets(0, -130, 0, 0)
     if mm.Text then mm.Text:SetText("") end
     local mml = fs(win, 12)
@@ -233,6 +299,7 @@ end
 
 -- otevřít mapu: zone = mapa (nebo tvoje zóna), item = zvýraznit jen jeden předmět
 function C.OpenMap(zone, item, tg)
+    if CrafterDB.mapW then W = CrafterDB.mapW end
     if not win then create() end
     onlyItem = item
     target = tg
