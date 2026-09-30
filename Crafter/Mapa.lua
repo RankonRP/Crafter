@@ -41,6 +41,20 @@ local function calibrate()
 end
 C.Calibrate = function() return calibrate() end
 
+-- Poloha hráče ve světových souřadnicích (x, y, kontinent). Forever může UnitPosition
+-- addonům nedávat -> náhradou poloha na mapě zóny převedená zpět na světovou.
+function C.PlayerWorld()
+    local ok, a, b, _, inst = pcall(UnitPosition, "player")
+    if ok and a and b and not (issecretvalue and (issecretvalue(a) or issecretvalue(b))) then return a, b, inst, "unit" end
+    local zone = C_Map.GetBestMapForUnit("player")
+    local pp = zone and C_Map.GetPlayerMapPosition(zone, "player")
+    if not pp then return nil end
+    local cont, w = C_Map.GetWorldPosFromMapPos(zone, pp)
+    if not cont or not w then return nil end
+    if CrafterDB and CrafterDB.axis == "ba" then return w.y, w.x, cont, "map" end
+    return w.x, w.y, cont, "map"
+end
+
 -- vrací název zóny, uiMapID zóny a souřadnice 0..1 v ní (nebo nil)
 function C.ZoneOf(map, x, y)
     calibrate()
@@ -179,8 +193,7 @@ function C.ShowOnMap(itemID, name)
     CrafterDB.mapItemName = name
     local pts = allPoints(itemID)
     if #pts == 0 then C.Msg("pro tuhle surovinu nemam zadne misto na mape.") return end
-    local a, b, _, inst
-    pcall(function() a, b, _, inst = UnitPosition("player") end)
+    local a, b, inst = C.PlayerWorld()
     local best, bestD
     for _, p in ipairs(pts) do
         if a and p[2] == inst then

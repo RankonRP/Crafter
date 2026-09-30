@@ -577,6 +577,7 @@ SlashCmdList.CRAFTER = function(msg)
     if msg == "vycistit" then wipe(CrafterDB.list); refreshList(); C.Msg("seznam vycisten.") return end
     if msg == "mapa" then C.ClearMap(); C.Msg("znacky na mape skryty.") return end
     if msg == "sber" then C.Sber.Toggle() return end
+    if msg == "ladit" then C.Sber.Debug() return end
     if msg == "osy" then
         CrafterDB.dbSwap = not CrafterDB.dbSwap
         C.Sber.Rebuild()

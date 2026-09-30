@@ -78,8 +78,8 @@ local function spellName(id)
 end
 
 local function record(kind, name)
-    local ok, a, b, _, inst = pcall(UnitPosition, "player")
-    if not ok or not a or not name or name == "" then return end
+    local a, b, inst = C.PlayerWorld()
+    if not a or not name or name == "" then return end
 
     local f = CrafterDB.found[name] or { t = kind, i = 0, p = {} }
     CrafterDB.found[name] = f
@@ -194,8 +194,8 @@ local INDOOR = { [0] = 300, 240, 180, 120, 80, 50 }
 local function updateMinimap()
     for _, p in ipairs(miniPins) do p:Hide() end
     if not CrafterDB or not CrafterDB.sber.minimap or not Minimap:IsVisible() then return end
-    local ok, a, b, _, inst = pcall(UnitPosition, "player")
-    if not ok or not a or not grid[inst] then return end
+    local a, b, inst = C.PlayerWorld()
+    if not a or not grid[inst] then return end
     local zone = C_Map.GetBestMapForUnit("player")
     local f = zone and mapFrame(zone)
     local pp = zone and C_Map.GetPlayerMapPosition(zone, "player")
@@ -241,6 +241,37 @@ local function updateMinimap()
                 end
             end
         end
+    end
+end
+
+-- /crafter ladit: co addon vidí (pro hledání chyb v mapě a minimapě)
+function S.Debug()
+    local ok, ua, ub, _, uinst = pcall(UnitPosition, "player")
+    C.Msg(("UnitPosition: %s %s %s %s"):format(tostring(ok), tostring(ua), tostring(ub), tostring(uinst)))
+    local a, b, inst, src = C.PlayerWorld()
+    C.Msg(("poloha hrace: %s, %s kontinent %s (zdroj %s), osy %s"):format(tostring(a), tostring(b), tostring(inst), tostring(src), tostring(CrafterDB.axis)))
+    local zone = C_Map.GetBestMapForUnit("player")
+    local info = zone and C_Map.GetMapInfo(zone)
+    local f = zone and mapFrame(zone)
+    C.Msg(("zona: %s %s typ %s | ramec mapy: %s"):format(tostring(zone), info and info.name or "?", info and tostring(info.mapType) or "?",
+        f and ("kontinent " .. tostring(f.cont) .. ", " .. math.floor(f.width) .. "x" .. math.floor(f.height) .. " yd") or "NENI"))
+    local keys = {}
+    for k, list in pairs(byMap) do keys[#keys + 1] = k .. "=" .. #list end
+    C.Msg("body podle kontinentu: " .. (#keys > 0 and table.concat(keys, ", ") or "zadne"))
+    if f and byMap[f.cont] then
+        local inZone, best, bestD = 0, nil, nil
+        local pp = C_Map.GetPlayerMapPosition(zone, "player")
+        for _, pt in ipairs(byMap[f.cont]) do
+            local u, v = toMap(f, f.cont, pt[1], pt[2])
+            if u >= 0 and u <= 1 and v >= 0 and v <= 1 then
+                inZone = inZone + 1
+                if pp then
+                    local d = (u - pp.x) ^ 2 + (v - pp.y) ^ 2
+                    if not bestD or d < bestD then best, bestD = { pt[5], u, v }, d end
+                end
+            end
+        end
+        C.Msg(("v teto zone bodu: %d%s"):format(inZone, best and ("; nejblizsi " .. best[1] .. (" (%.0f, %.0f)"):format(best[2] * 100, best[3] * 100)) or ""))
     end
 end
 
