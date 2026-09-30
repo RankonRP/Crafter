@@ -350,6 +350,7 @@ function refreshList()
         row.del:Hide()
         row:SetScript("OnEnter", nil)
         row:SetScript("OnLeave", nil)
+        row:SetScript("OnClick", nil)
         fill(row)
         row:Show()
     end
@@ -396,13 +397,25 @@ function refreshList()
                 row:SetScript("OnEnter", function(self)
                     local lines = { { t.name }, { ("Máš %d (i v bance), potřeba %d, chybí %d."):format(t.have, t.need, t.missing), 0.8, 0.8, 0.8 } }
                     if t.price then
-                        lines[#lines + 1] = { ("U obchodníka %s: %s za kus"):format(CrafterDB.vendorName[t.id] or "?", C.Money(t.price)), 0.6, 1, 0.6 }
+                        lines[#lines + 1] = { ("Viděno u %s: %s za kus"):format(CrafterDB.vendorName[t.id] or "?", C.Money(t.price)), 0.6, 1, 0.6 }
+                    end
+                    local src = C.SourceLines and C.SourceLines(t.id, 3)
+                    if src and #src > 0 then
+                        lines[#lines + 1] = { " " }
+                        lines[#lines + 1] = { "Kde sehnat:", ACCENT[1], ACCENT[2], ACCENT[3] }
+                        for _, l in ipairs(src) do
+                            local col = C.SOURCE_COLOR[l[1]]
+                            lines[#lines + 1] = { l[2], col[1], col[2], col[3] }
+                        end
+                        lines[#lines + 1] = { " " }
+                        lines[#lines + 1] = { "Klik = ukázat na mapě (značka k nejbližšímu místu, tečky na mapě světa)", 0.7, 0.7, 0.7 }
                     else
-                        lines[#lines + 1] = { "Cenu u obchodníka neznám (sbírá se, nebo se kupuje v aukci).", 0.7, 0.7, 0.7 }
+                        lines[#lines + 1] = { "Kde ji sehnat, nevím (nová věc ve Forever, nebo jen z aukce).", 0.7, 0.7, 0.7 }
                     end
                     showTip(self, lines)
                 end)
                 row:SetScript("OnLeave", hideTip)
+                row:SetScript("OnClick", function() if C.ShowOnMap then C.ShowOnMap(t.id, t.name) end end)
             end)
             if t.missing > 0 then
                 if t.price then missingCost = missingCost + t.price * t.missing else unknown = true end
@@ -559,11 +572,13 @@ SlashCmdList.CRAFTER = function(msg)
     msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
     if msg == "" or msg == "seznam" then C.ToggleList() return end
     if msg == "vycistit" then wipe(CrafterDB.list); refreshList(); C.Msg("seznam vycisten.") return end
+    if msg == "mapa" then C.ClearMap(); C.Msg("znacky na mape skryty.") return end
+    if msg == "popisky" then CrafterDB.tooltip = CrafterDB.tooltip == false; C.Msg("kde sehnat v popiscich predmetu: " .. (CrafterDB.tooltip == false and "vypnuto" or "zapnuto")) return end
     if msg == "ceny" then
         local n = 0
         for _ in pairs(CrafterDB.prices) do n = n + 1 end
         C.Msg(("znam ceny %d surovin od obchodniku."):format(n))
         return
     end
-    C.Msg("/crafter = nakupni seznam, /crafter vycistit, /crafter ceny. Panel 'Co vyrobit' se ukaze sam u okna profese.")
+    C.Msg("/crafter = nakupni seznam, /crafter vycistit, /crafter ceny, /crafter mapa (skryt znacky), /crafter popisky (kde sehnat v popiscich). Panel Co vyrobit se ukaze sam u okna profese.")
 end
