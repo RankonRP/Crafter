@@ -301,7 +301,8 @@ local function attachPanel()
     if not panel then createPanel() end
     local host = (provider.kind == "craft" and CraftFrame) or (provider.kind == "retail" and ProfessionsFrame) or TradeSkillFrame
     panel:ClearAllPoints()
-    panel:SetPoint("TOPLEFT", host, "TOPRIGHT", 4, 0)
+    -- vedle okna jsou záložky pro přepínání profesí (asi 65 bodů) -> panel až za ně
+    panel:SetPoint("TOPLEFT", host, "TOPRIGHT", 70, 0)
     panel:Show()
     refreshPanel()
 end
