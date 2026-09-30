@@ -192,8 +192,12 @@ end
 
 local function create()
     win = CreateFrame("Frame", "CrafterMapa", UIParent, "BackdropTemplate")
-    win:SetPoint("CENTER")
-    win:SetFrameStrata("HIGH")
+    win:Hide()
+    -- poloha: uložená, jinak vpravo (mimo okna profese a Crafteru)
+    local pos = CrafterDB.mapPos
+    if pos then win:SetPoint(pos[1], UIParent, pos[1], pos[2], pos[3]) else win:SetPoint("RIGHT", UIParent, "RIGHT", -30, -40) end
+    win:SetFrameStrata("DIALOG")   -- vždy nad panelem Crafteru
+    win:SetToplevel(true)          -- kliknutím dopředu
     win:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
     win:SetBackdropColor(0.03, 0.03, 0.03, 0.96)
     win:SetBackdropBorderColor(0.9, 0.7, 0.3, 1)
@@ -201,8 +205,14 @@ local function create()
     win:SetMovable(true)
     win:SetClampedToScreen(true)
     win:RegisterForDrag("LeftButton")
+    local function savePos()
+        win:StopMovingOrSizing()
+        local point, _, _, x, y = win:GetPoint()
+        CrafterDB.mapPos = { point, math.floor(x + 0.5), math.floor(y + 0.5) }
+    end
     win:SetScript("OnDragStart", win.StartMoving)
-    win:SetScript("OnDragStop", win.StopMovingOrSizing)
+    win:SetScript("OnDragStop", savePos)
+    win.savePos = savePos
     tinsert(UISpecialFrames, "CrafterMapa")
     local title = fs(win, 14, 0.9, 0.7, 0.3)
     title:SetPoint("TOPLEFT", 10, -9)
@@ -256,6 +266,11 @@ local function create()
 
     canvas = CreateFrame("Frame", nil, win)
     canvas:SetPoint("TOPLEFT", 10, -60)
+    -- posouvat se dá i tažením za mapu
+    canvas:EnableMouse(true)
+    canvas:RegisterForDrag("LeftButton")
+    canvas:SetScript("OnDragStart", function() win:StartMoving() end)
+    canvas:SetScript("OnDragStop", function() win.savePos() end)
     arrow = canvas:CreateTexture(nil, "OVERLAY", nil, 7)
     arrow:SetTexture("Interface\\Minimap\\MinimapArrow")
     arrow:SetSize(28, 28)
@@ -303,10 +318,11 @@ local function create()
     mm:SetScript("OnClick", function(self) CrafterDB.sber.minimap = self:GetChecked() and true or false end)
     win.mm = mm
 
-    win:SetScript("OnShow", function()
-        for k, cb in pairs(win.checks) do cb:SetChecked(CrafterDB.sber[k]) end
-        win.mm:SetChecked(CrafterDB.sber.minimap)
-    end)
+    win.sync = function()
+        for k, cb in pairs(win.checks) do cb:SetChecked(CrafterDB.sber[k] and true or false) end
+        win.mm:SetChecked(CrafterDB.sber.minimap and true or false)
+    end
+    win:SetScript("OnShow", win.sync)
     C_Timer.NewTicker(0.2, function() pcall(updateArrow) end)
 end
 
@@ -319,6 +335,8 @@ function C.OpenMap(zone, item, tg)
     local id = zone or C_Map.GetBestMapForUnit("player")
     if not id then C.Msg("nevim, kde jsi - zkus to venku.") return end
     win:Show()
+    win:Raise()
+    win.sync()
     show(id)
 end
 
