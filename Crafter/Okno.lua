@@ -521,14 +521,14 @@ function refreshList()
                             lines[#lines + 1] = { l[2], col[1], col[2], col[3] }
                         end
                         lines[#lines + 1] = { " " }
-                        lines[#lines + 1] = { "Klik = ukázat na mapě (značka k nejbližšímu místu, tečky na mapě světa)", 0.7, 0.7, 0.7 }
+                        lines[#lines + 1] = { "Klik = ukázat na mapě Crafteru", 0.7, 0.7, 0.7 }
                     else
                         lines[#lines + 1] = { "Kde ji sehnat, nevím (nová věc ve Forever, nebo jen z aukce).", 0.7, 0.7, 0.7 }
                     end
                     showTip(self, lines)
                 end)
                 row:SetScript("OnLeave", hideTip)
-                row:SetScript("OnClick", function() if C.ShowOnMap then C.ShowOnMap(t.id, t.name) end end)
+                row:SetScript("OnClick", function() C.MapFor(t.id, t.name) end)
             end)
             if t.missing > 0 then
                 if t.price then missingCost = missingCost + t.price * t.missing elseif C.Farmable(t.id) then farm = true else unknown = true end
