@@ -13,6 +13,9 @@ local function vec(map, x, y)
     return CreateVector2D(x, y)
 end
 
+C.Vec = function(map, x, y) return vec(map, x, y) end
+-- body z databáze: kdyby osy databáze byly v jiném pořadí než ve hře, /crafter osy je prohodí
+C.DbXY = function(x, y) if CrafterDB and CrafterDB.dbSwap then return y, x end return x, y end
 local zoneCache = {}
 
 -- jednou: zjistit, v jakém pořadí C_Map chce souřadnice (podle polohy hráče)
@@ -36,6 +39,7 @@ local function calibrate()
     end)
     return ok
 end
+C.Calibrate = function() return calibrate() end
 
 -- vrací název zóny, uiMapID zóny a souřadnice 0..1 v ní (nebo nil)
 function C.ZoneOf(map, x, y)
@@ -70,7 +74,7 @@ end
 local function zonesOf(pts, max)
     local count, order = {}, {}
     for i = 1, #pts, 3 do
-        local name = C.ZoneOf(pts[i], pts[i + 1], pts[i + 2])
+        local name = C.ZoneOf(pts[i], C.DbXY(pts[i + 1], pts[i + 2]))
         if name then
             if not count[name] then count[name] = 0; order[#order + 1] = name end
             count[name] = count[name] + 1
@@ -156,7 +160,8 @@ local function allPoints(itemID, limit)
     local function add(kind, pts, name)
         for i = 1, #pts, 3 do
             if #out >= (limit or 800) then return end
-            out[#out + 1] = { kind, pts[i], pts[i + 1], pts[i + 2], name }
+            local x, y = C.DbXY(pts[i + 1], pts[i + 2])
+            out[#out + 1] = { kind, pts[i], x, y, name }
         end
     end
     for _, id in ipairs(z.v or {}) do local n = Crafter_NPC[id]; if n then add("v", n.p, n.n) end end

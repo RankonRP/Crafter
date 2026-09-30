@@ -57,7 +57,7 @@ const num = (v) => Number(v) || 0;
 // --- položky: suroviny z receptů + obchodní zboží ---------------------------
 console.log("čtu item_template…");
 const items = {};
-for (const r of rows("item_template")) items[r.entry] = { name: r.name, cls: num(r.class), buy: num(r.BuyPrice), buyCount: Math.max(1, num(r.BuyCount)) };
+for (const r of rows("item_template")) items[r.entry] = { name: r.name, cls: num(r.class), sub: num(r.subclass), buy: num(r.BuyPrice), buyCount: Math.max(1, num(r.BuyCount)) };
 
 console.log("čtu spell_template…");
 const crafted = {};     // itemID -> [názvy receptů]
@@ -219,6 +219,34 @@ for (const id of wanted) {
   if (Object.keys(e).length) out[id] = e;
 }
 
+// --- ložiska rud a byliny: VŠECHNA místa (pro mapu a minimapu jako Gatherer) -----
+// ruda = ložisko s „Vein“/„Deposit“ v názvu, bylina = kořist obsahuje bylinu (třída 7, podtřída 9)
+const goLoot = {};   // loot entry -> [itemID]
+for (const r of rows("gameobject_loot_template")) {
+  const list = (goLoot[r.entry] = goLoot[r.entry] || []);
+  if (num(r.mincountOrRef) < 0) for (const it of Object.keys(refItems[-num(r.mincountOrRef)] || {})) list.push(it);
+  else list.push(r.item);
+}
+const nodeOut = {};
+let nodePoints = 0;
+for (const r of rows("gameobject_template")) {
+  if (num(r.type) !== 3 || !num(r.data1)) continue;
+  const loot = goLoot[r.data1] || [];
+  let kind = null, main = null;
+  if (/vein|deposit/i.test(r.name)) {
+    kind = "m";
+    main = loot.find((i) => items[i] && /ore$/i.test(items[i].name)) || loot.find((i) => items[i] && items[i].cls === 7);
+  } else {
+    const herb = loot.find((i) => items[i] && items[i].cls === 7 && items[i].sub === 9);
+    if (herb && !/chest|crate|box|barrel|sack|basket|stash|cache/i.test(r.name)) { kind = "h"; main = herb; }
+  }
+  if (!kind || !gSpawns[r.entry]) continue;
+  const pts = [];
+  for (const p of gSpawns[r.entry]) pts.push(p.map, Math.round(p.x), Math.round(p.y));
+  nodeOut[r.entry] = { n: r.name, t: kind, i: Number(main) || 0, p: pts };
+  nodePoints += pts.length / 3;
+}
+
 // --- zápis do Lua ------------------------------------------------------------
 const q = (s) => '"' + String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
 function lua(v) {
@@ -235,7 +263,10 @@ s += "}\n-- Crafter_NPC[id] = { n = jméno, s = podtitul, l1/l2 = úroveň, p = 
 for (const [id, e] of Object.entries(npcOut)) s += "[" + id + "]=" + lua(e) + ",\n";
 s += "}\n-- Crafter_OBJ[id] = { n = jméno (bylina, žíla), p = {mapa,x,y…}, c = počet spawnů }\nCrafter_OBJ = {\n";
 for (const [id, e] of Object.entries(objOut)) s += "[" + id + "]=" + lua(e) + ",\n";
+s += "}\n-- Crafter_Uzly[objektID] = { n = jméno, t = \"m\" ruda / \"h\" bylina, i = hlavní předmět (ikonka), p = všechna místa {mapa,x,y…} }\nCrafter_Uzly = {\n";
+for (const [id, e] of Object.entries(nodeOut)) s += "[" + id + "]=" + lua(e) + ",\n";
 s += "}\n";
+console.log(`ložiska a byliny: ${Object.keys(nodeOut).length} druhů, ${nodePoints} míst`);
 const target = path.join(__dirname, "..", "Crafter", "Zdroje.lua");
 fs.writeFileSync(target, s);
 console.log(`hotovo: surovin se zdrojem ${Object.keys(out).length}, NPC ${Object.keys(npcOut).length}, objektů ${Object.keys(objOut).length}, ${Math.round(s.length / 1024)} kB`);

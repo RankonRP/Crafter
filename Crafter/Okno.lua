@@ -503,7 +503,10 @@ local function createMinimap()
     border:SetPoint("TOPLEFT")
     mm:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
     mm:RegisterForDrag("LeftButton")
-    mm:SetScript("OnClick", function() C.ToggleList() end)
+    mm:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    mm:SetScript("OnClick", function(_, button)
+        if button == "RightButton" then C.Sber.Toggle() else C.ToggleList() end
+    end)
     mm:SetScript("OnDragStart", function(self)
         self:SetScript("OnUpdate", function()
             local mx, my = Minimap:GetCenter()
@@ -515,7 +518,7 @@ local function createMinimap()
     end)
     mm:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
     mm:SetScript("OnEnter", function(self)
-        showTip(self, { { "Crafter" }, { "Klik: nákupní seznam", 0.9, 0.9, 0.9 },
+        showTip(self, { { "Crafter" }, { "Klik: nákupní seznam", 0.9, 0.9, 0.9 }, { "Pravý klik: sběr – rudy a byliny na mapě", 0.9, 0.9, 0.9 },
                         { "Panel „Co vyrobit“ se ukáže sám u okna profese.", 0.7, 0.7, 0.7 }, { "Tažením posuneš ikonu.", 0.7, 0.7, 0.7 } })
     end)
     mm:SetScript("OnLeave", hideTip)
@@ -573,6 +576,14 @@ SlashCmdList.CRAFTER = function(msg)
     if msg == "" or msg == "seznam" then C.ToggleList() return end
     if msg == "vycistit" then wipe(CrafterDB.list); refreshList(); C.Msg("seznam vycisten.") return end
     if msg == "mapa" then C.ClearMap(); C.Msg("znacky na mape skryty.") return end
+    if msg == "sber" then C.Sber.Toggle() return end
+    if msg == "osy" then
+        CrafterDB.dbSwap = not CrafterDB.dbSwap
+        C.Sber.Rebuild()
+        if C.RefreshMapPins then C.RefreshMapPins() end
+        C.Msg("mista z databaze: osy " .. (CrafterDB.dbSwap and "PROHOZENY" or "puvodni") .. ". Kdyz jsou tecky na mape mimo, prepni zpatky.")
+        return
+    end
     if msg == "popisky" then CrafterDB.tooltip = CrafterDB.tooltip == false; C.Msg("kde sehnat v popiscich predmetu: " .. (CrafterDB.tooltip == false and "vypnuto" or "zapnuto")) return end
     if msg == "ceny" then
         local n = 0
@@ -580,5 +591,5 @@ SlashCmdList.CRAFTER = function(msg)
         C.Msg(("znam ceny %d surovin od obchodniku."):format(n))
         return
     end
-    C.Msg("/crafter = nakupni seznam, /crafter vycistit, /crafter ceny, /crafter mapa (skryt znacky), /crafter popisky (kde sehnat v popiscich). Panel Co vyrobit se ukaze sam u okna profese.")
+    C.Msg("/crafter = nakupni seznam, /crafter sber (rudy a byliny na mape), /crafter vycistit, /crafter ceny, /crafter mapa (skryt znacky), /crafter popisky, /crafter osy. Panel Co vyrobit se ukaze sam u okna profese.")
 end
