@@ -200,13 +200,13 @@ local function skillRecipes()
     for _, r in ipairs(provider.recipes()) do
         if r.diff ~= "trivial" then out[#out + 1] = r end
     end
+    -- nejméně náročné na jeden bod dovednosti první (co máš v taškách je zdarma, šance na bod se započítá)
+    for _, r in ipairs(out) do r.pointCost = C.PointCost(r) end
     table.sort(out, function(a, b)
+        if math.abs(a.pointCost - b.pointCost) > 0.5 then return a.pointCost < b.pointCost end
         local da, db = (C.DIFF[a.diff] or C.DIFF.easy).order, (C.DIFF[b.diff] or C.DIFF.easy).order
         if da ~= db then return da < db end
-        if (a.numAvailable > 0) ~= (b.numAvailable > 0) then return a.numAvailable > 0 end
-        local ca = C.RecipeCost(a)
-        local cb = C.RecipeCost(b)
-        if ca ~= cb then return ca < cb end
+        if a.numAvailable ~= b.numAvailable then return a.numAvailable > b.numAvailable end
         return a.name < b.name
     end)
     return out
@@ -267,7 +267,7 @@ local function createSkillPage(p)
 
     local more = text(p, fontSmall, 0.7, 0.7, 0.7)
     more:SetPoint("TOPLEFT", 2, -142)
-    more:SetText("Další recepty, které zvednou skill (klik = doporučit a vybrat)")
+    more:SetText("Další recepty – od nejlevnějšího bodu (klik = doporučit a vybrat)")
     skill.more = more
     skill.sf, skill.content = scrollArea(p, -160, 0)
     skill.rows = {}
@@ -301,7 +301,7 @@ function refreshSkill()
     card.icon:SetTexture(focus.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
     card.name:SetText(focus.name)
     card.name:SetTextColor(d.color[1], d.color[2], d.color[3])
-    card.chance:SetText(d.label)
+    card.chance:SetText(d.label .. "  ·  " .. C.PointCostText(focus))
     card.chance:SetTextColor(d.color[1], d.color[2], d.color[3])
     local need = piecesToMax(focus)
     local left = (main.rank and main.max) and (main.max - main.rank) or 0
@@ -322,7 +322,7 @@ function refreshSkill()
                 row.icon:SetPoint("LEFT", 2, 0)
                 row.name = text(row, fontNormal)
                 row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-                row.name:SetPoint("RIGHT", -110, 0)
+                row.name:SetPoint("RIGHT", -135, 0)
                 row.name:SetWordWrap(false)
                 row.right = text(row, fontSmall, 0.75, 0.75, 0.75)
                 row.right:SetPoint("RIGHT", -4, 0)
@@ -342,7 +342,8 @@ function refreshSkill()
             row.icon:SetTexture(r.icon)
             row.name:SetText(r.name)
             row.name:SetTextColor(rd.color[1], rd.color[2], rd.color[3])
-            row.right:SetText(rd.label .. (r.numAvailable > 0 and ("  ·  %d×"):format(r.numAvailable) or ""))
+            local pc, free = C.PointCost(r)
+            row.right:SetText(free and (rd.label .. " · zdarma") or (pc < math.huge and (rd.label .. " · ~" .. C.Money(math.floor(pc + 0.5))) or rd.label))
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", 0, -(n - 1) * 26)
             row:SetPoint("RIGHT", skill.content, "RIGHT", 0, 0)

@@ -260,6 +260,50 @@ function C.RecipeCost(r)
     return total, unknown, farm
 end
 
+-------------------------------------------------------------------------------
+-- Náročnost na jeden bod dovednosti (pro řazení „co nejméně za co nejvíc bodů“)
+-------------------------------------------------------------------------------
+local GATHER_COST = 30    -- „cena“ jedné sbírané suroviny v měďácích (čas a práce) – odhad
+local UNKNOWN_COST = 80   -- surovina, o které nevíme, kde se sežene
+local POINT_CHANCE = { optimal = 1, medium = 0.6, easy = 0.25, trivial = 0 }
+
+-- náročnost jednoho kusu suroviny (vyráběné = součet jejích surovin, max. 3 úrovně)
+local function unitCost(id, depth)
+    local p = C.PriceOf(id)
+    if p then return p end
+    local z = Crafter_Zdroje and Crafter_Zdroje[id]
+    if z and (z.s or z.g or z.d) then return GATHER_COST end
+    if z and z.r and (depth or 0) < 3 then
+        local sum = 0
+        for _, rg in ipairs(z.r) do sum = sum + rg[2] * unitCost(rg[1], (depth or 0) + 1) end
+        return sum
+    end
+    return UNKNOWN_COST
+end
+
+-- vrací náročnost na 1 bod (nižší = lepší) a jestli jsou všechny suroviny v taškách (zdarma)
+function C.PointCost(r)
+    local chance = POINT_CHANCE[r.diff] or 0.25
+    if chance == 0 then return math.huge, false end
+    local cost, free = 0, true
+    for _, rg in ipairs(r.reagents) do
+        local missing = math.max(0, rg.need - (rg.have or 0))   -- co máš v taškách, je zdarma
+        if missing > 0 then
+            free = false
+            cost = cost + missing * unitCost(rg.id)
+        end
+    end
+    return cost / chance, free
+end
+
+-- text pro zobrazení: "zdarma", "~15c / bod", "~1s 20c / bod"
+function C.PointCostText(r)
+    local cost, free = C.PointCost(r)
+    if free then return "zdarma – máš suroviny" end
+    if cost == math.huge then return "" end
+    return "~" .. C.Money(math.floor(cost + 0.5)) .. " / bod"
+end
+
 -- cena k zobrazení: "10c", "10c + sběr", "jen sběr", "cena ?"
 function C.CostText(cost, unknown, farm)
     cost = cost or 0
