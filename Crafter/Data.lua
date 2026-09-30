@@ -69,6 +69,16 @@ local function reagentInfo(id, name, icon, need)
     return { id = id, name = name, icon = icon, need = need or 1, have = id and GetItemCount(id, true) or 0 }
 end
 
+-- kolik kusů jde vyrobit ze surovin v taškách (Forever tenhle počet nevrací) – bere se větší z obou
+local function craftableCount(r)
+    if #r.reagents == 0 then return r.numAvailable or 0 end
+    local n = math.huge
+    for _, rg in ipairs(r.reagents) do
+        n = math.min(n, math.floor((rg.have or 0) / math.max(1, rg.need or 1)))
+    end
+    return math.max(r.numAvailable or 0, n == math.huge and 0 or n)
+end
+
 local TRADE = {
     kind = "trade",
     available = function() return GetNumTradeSkills ~= nil and TradeSkillFrame ~= nil and TradeSkillFrame:IsShown() end,
@@ -88,6 +98,7 @@ local TRADE = {
                     local rName, rIcon, rCount = GetTradeSkillReagentInfo(i, k)
                     r.reagents[#r.reagents + 1] = reagentInfo(itemIDFromLink(GetTradeSkillReagentItemLink(i, k)), rName, rIcon, rCount)
                 end
+                r.numAvailable = craftableCount(r)
                 out[#out + 1] = r
             end
         end
@@ -118,6 +129,7 @@ local CRAFT = {
                     local rName, rIcon, rCount = GetCraftReagentInfo(i, k)
                     r.reagents[#r.reagents + 1] = reagentInfo(itemIDFromLink(GetCraftReagentItemLink(i, k)), rName, rIcon, rCount)
                 end
+                r.numAvailable = craftableCount(r)
                 out[#out + 1] = r
             end
         end
@@ -159,6 +171,7 @@ local RETAIL = {
                         end
                     end
                 end
+                r.numAvailable = craftableCount(r)
                 out[#out + 1] = r
             end
         end
@@ -213,6 +226,12 @@ function C.RecipeCost(r)
         if p then total = total + p * rg.need else unknown = true end
     end
     return total, unknown
+end
+
+-- cena k zobrazení: žádná známá = "cena ?", část neznámá = "12s + ?"
+function C.CostText(cost, unknown)
+    if unknown and (cost or 0) == 0 then return "cena ?" end
+    return C.Money(cost) .. (unknown and " + ?" or "")
 end
 
 function C.Money(copper)

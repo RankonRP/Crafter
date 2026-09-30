@@ -120,7 +120,7 @@ local function updateRow(row, r)
     local cost, unknown = C.RecipeCost(r)
     local parts = { d.label }
     parts[#parts + 1] = r.numAvailable > 0 and ("vyrobíš %d×"):format(r.numAvailable) or "chybí suroviny"
-    if cost > 0 or not unknown then parts[#parts + 1] = C.Money(cost) .. (unknown and " + ?" or "") else parts[#parts + 1] = "cena ?" end
+    parts[#parts + 1] = C.CostText(cost, unknown)
     row.info:SetText(table.concat(parts, "  ·  "))
     row.sel:SetShown(selected and selected.name == r.name or false)
 end
@@ -196,7 +196,7 @@ local function refreshPanel()
     if selected then
         panel.selName:SetText(selected.name)
         local cost, unknown = C.RecipeCost(selected)
-        panel.selCost:SetText(("%d× = %s%s"):format(qty, C.Money(cost * qty), unknown and " + ?" or ""))
+        panel.selCost:SetText(("%d× = %s"):format(qty, C.CostText(cost * qty, unknown)))
         panel.add:Enable()
     else
         panel.selName:SetText("Vyber recept v seznamu nahoře")
