@@ -129,11 +129,44 @@ local function drawPins()
     win.zone:SetText((info and info.name or "?") .. (onlyItem and ("  –  jen " .. C.Sber.ItemName(onlyItem)) or ""))
     -- hvězdička: kam jít pro surovinu, kterou ještě nemáš nalezenou
     if not star then
+        -- značka cíle: pulzující zlatý kruh, uvnitř ikonka suroviny, pod ní jméno místa
         star = CreateFrame("Frame", nil, canvas)
-        star:SetSize(24, 24)
-        star.tex = star:CreateTexture(nil, "OVERLAY")
-        star.tex:SetAllPoints()
-        star.tex:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_1")
+        star:SetSize(34, 34)
+        local mask = star:CreateMaskTexture()
+        mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        mask:SetAllPoints()
+        star.glow = star:CreateTexture(nil, "ARTWORK")
+        star.glow:SetPoint("CENTER")
+        star.glow:SetSize(54, 54)
+        star.glow:SetTexture("Interface\\Buttons\\WHITE8x8")
+        star.glow:SetVertexColor(1, 0.8, 0.1, 0.5)
+        local gmask = star:CreateMaskTexture()
+        gmask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        gmask:SetAllPoints(star.glow)
+        star.glow:AddMaskTexture(gmask)
+        local pulse = star.glow:CreateAnimationGroup()
+        pulse:SetLooping("BOUNCE")
+        local a = pulse:CreateAnimation("Alpha")
+        a:SetFromAlpha(1)
+        a:SetToAlpha(0.15)
+        a:SetDuration(0.6)
+        pulse:Play()
+        star.ring = star:CreateTexture(nil, "OVERLAY", nil, 1)
+        star.ring:SetAllPoints()
+        star.ring:SetTexture("Interface\\Buttons\\WHITE8x8")
+        star.ring:SetVertexColor(1, 0.82, 0.1, 1)
+        star.ring:AddMaskTexture(mask)
+        star.tex = star:CreateTexture(nil, "OVERLAY", nil, 2)
+        star.tex:SetPoint("CENTER")
+        star.tex:SetSize(26, 26)
+        local imask = star:CreateMaskTexture()
+        imask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        imask:SetAllPoints(star.tex)
+        star.tex:AddMaskTexture(imask)
+        star.name = star:CreateFontString(nil, "OVERLAY")
+        star.name:SetFont(FONT, 12, "OUTLINE")
+        star.name:SetTextColor(1, 0.85, 0.2)
+        star.name:SetPoint("TOP", star, "BOTTOM", 0, -4)
         star:EnableMouse(true)
         star:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -145,6 +178,8 @@ local function drawPins()
     end
     if target and target.zoneID == mapID and target.x then
         star.label, star.item = target.label, target.item
+        star.tex:SetTexture(onlyItem and C.Sber.IconOf(onlyItem) or "Interface\\Icons\\INV_Misc_Bag_10")
+        star.name:SetText(target.label or "")
         star:ClearAllPoints()
         star:SetPoint("CENTER", canvas, "TOPLEFT", target.x * w, -target.y * h)
         star:SetFrameLevel(canvas:GetFrameLevel() + 3)
@@ -153,7 +188,7 @@ local function drawPins()
         star:Hide()
     end
     if n == 0 and target and target.zoneID == mapID then
-        win.count:SetText(("Zatím nenalezeno – hvězdička = nejbližší místo: %s. Na mapě hry máš značku."):format(target.label or "?"))
+        win.count:SetText(("Zatím nenalezeno – zlatý kruh = nejbližší místo: %s"):format(target.label or "?"))
     else
         win.count:SetText(n == 0 and "Tady zatím nemáš žádné nálezy. Stahuj, těž, trhej – Crafter si místa zapamatuje." or ("Nálezů na mapě: %d"):format(n))
     end
@@ -219,14 +254,14 @@ local function create()
     tinsert(UISpecialFrames, "CrafterMapa")
     local title = fs(win, 14, 0.9, 0.7, 0.3)
     title:SetPoint("TOPLEFT", 10, -9)
-    title:SetText("Crafter – moje nálezy")
+    title:SetText("Crafter")
     local close = CreateFrame("Button", nil, win, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", 2, 2)
 
     -- zóna a přepínání
     local prev = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
     prev:SetSize(26, 22)
-    prev:SetPoint("TOPLEFT", 190, -6)
+    prev:SetPoint("TOPLEFT", 80, -6)
     prev:SetText("<")
     prev:SetScript("OnClick", function() cycle(-1) end)
     local nextB = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
@@ -246,8 +281,8 @@ local function create()
     for i, o in ipairs(FILTER) do
         local cb = CreateFrame("CheckButton", nil, win, "UICheckButtonTemplate")
         cb:SetSize(22, 22)
-        cb:SetPoint("TOPLEFT", 10 + (i - 1) * 92, -32)
-        cb:SetHitRectInsets(0, -70, 0, 0)
+        cb:SetPoint("TOPLEFT", 8 + (i - 1) * 72, -32)
+        cb:SetHitRectInsets(0, -44, 0, 0)
         if cb.Text then cb.Text:SetText("") end
         local l = fs(win, 12)
         l:SetPoint("LEFT", cb, "RIGHT", 2, 0)
@@ -260,11 +295,11 @@ local function create()
         win.checks[o[1]] = cb
     end
     local all = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
-    all:SetSize(110, 22)
+    all:SetSize(90, 22)
     all:SetPoint("TOPRIGHT", -10, -32)
     all:SetNormalFontObject(CrafterFontButton)
     all:SetHighlightFontObject(CrafterFontButtonHl)
-    all:SetText("Ukázat vše")
+    all:SetText("Vše")
     all:SetScript("OnClick", function() onlyItem = nil; target = nil; drawPins() end)
 
     view = CreateFrame("ScrollFrame", nil, win)
@@ -378,18 +413,18 @@ local function create()
         plus:SetScript("OnClick", function() set((CrafterDB[key] or default) + 2) end)
         val:SetText(CrafterDB[key] or default)
     end
-    sizeStepper(10, "Ikonky: mapa", "mapIcon", 18, function() drawPins() end)
-    sizeStepper(185, "minimapa", "miniIcon", 14, function() end)
+    sizeStepper(10, "Mapa", "mapIcon", 18, function() drawPins() end)
+    sizeStepper(170, "Minimapa", "miniIcon", 14, function() end)
 
     win.count = fs(win, 11, 0.75, 0.75, 0.75)
-    win.count:SetPoint("BOTTOMLEFT", 170, 38)
+    win.count:SetPoint("BOTTOMLEFT", 168, 38)
     win.count:SetPoint("RIGHT", win, "RIGHT", -24, 0)
     win.count:SetJustifyH("LEFT")
     win.count:SetWordWrap(false)
 
     -- táhlo pro změnu velikosti (vpravo dole)
     win:SetResizable(true)
-    if win.SetResizeBounds then win:SetResizeBounds(560, 420, 1600, 1150) end
+    if win.SetResizeBounds then win:SetResizeBounds(400, 320, 1600, 1150) end
     local grip = CreateFrame("Button", nil, win)
     grip:SetSize(16, 16)
     grip:SetPoint("BOTTOMRIGHT", -2, 2)
@@ -405,7 +440,7 @@ local function create()
         pendingResize = true
         C_Timer.After(0.15, function()
             pendingResize = nil
-            local newW = math.floor(math.max(540, math.min(1580, win:GetWidth() - 20)))
+            local newW = math.floor(math.max(380, math.min(1580, win:GetWidth() - 20)))
             if newW ~= W or math.abs(win:GetHeight() - (view:GetHeight() + 122)) > 2 then
                 W = newW
                 CrafterDB.mapW = W
@@ -415,12 +450,18 @@ local function create()
     end)
     local mm = CreateFrame("CheckButton", nil, win, "UICheckButtonTemplate")
     mm:SetSize(22, 22)
-    mm:SetPoint("BOTTOMRIGHT", -140, 8)
-    mm:SetHitRectInsets(0, -130, 0, 0)
+    mm:SetPoint("BOTTOMLEFT", 146, 7)
+    mm:SetHitRectInsets(0, 0, 0, 0)
+    mm:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Ukazovat nalezy i na minimape")
+        GameTooltip:Show()
+    end)
+    mm:SetScript("OnLeave", GameTooltip_Hide)
     if mm.Text then mm.Text:SetText("") end
     local mml = fs(win, 12)
     mml:SetPoint("LEFT", mm, "RIGHT", 2, 0)
-    mml:SetText("I na minimapě")
+    mml:SetText("")
     mm:SetScript("OnClick", function(self) CrafterDB.sber.minimap = self:GetChecked() and true or false end)
     win.mm = mm
 
@@ -434,7 +475,7 @@ end
 
 -- otevřít mapu: zone = mapa (nebo tvoje zóna), item = zvýraznit jen jeden předmět
 function C.OpenMap(zone, item, tg)
-    if CrafterDB.mapW then W = math.max(540, CrafterDB.mapW) end
+    if CrafterDB.mapW then W = math.max(380, CrafterDB.mapW) end
     if not win then create() end
     onlyItem = item
     target = tg
