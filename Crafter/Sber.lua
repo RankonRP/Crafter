@@ -178,7 +178,7 @@ function S.ZonesWithFinds()
     return out
 end
 
-S.ItemName = function(id) return (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)) or (CrafterDB.itemNames and CrafterDB.itemNames[id]) or ("#" .. id) end
+S.ItemName = function(id) return (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)) or (CrafterDB.itemNames and CrafterDB.itemNames[id]) or (Crafter_Zdroje and Crafter_Zdroje[id] and Crafter_Zdroje[id].n) or ("#" .. id) end
 S.IconOf = function(id) return iconOf(id) end
 
 local function itemName(id)

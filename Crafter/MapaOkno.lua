@@ -502,6 +502,24 @@ end
 
 -- tlačítko Mapa u suroviny: tvoje nálezy -> vlastní mapa zóny s tou surovinou; jinak značka k nejbližšímu zdroji
 function C.MapFor(itemID, name)
+    -- vyrábí se to z něčeho (bar z rudy)? když ten předmět sám nemáš nalezený, hledej jeho suroviny
+    local z = itemID and Crafter_Zdroje and Crafter_Zdroje[itemID]
+    local own = itemID and C.Sber.Points(itemID)
+    if (not own or #own == 0) and z and z.r then
+        for _, rg in ipairs(z.r) do
+            local p = C.Sber.Points(rg[1])
+            if p and #p > 0 then
+                C.Msg(("%s se vyrabi z %s - ukazuju, kde ho mas nalezeny."):format(name or "?", C.Sber.ItemName(rg[1])))
+                return C.MapFor(rg[1], C.Sber.ItemName(rg[1]))
+            end
+        end
+        -- bar nikdo neprodává a rudu nemáš nalezenou -> nejbližší místo pro rudu
+        if not z.v then
+            local rg = z.r[1]
+            C.Msg(("%s se vyrabi z %s - ukazuju, kde ho sezenes."):format(name or "?", C.Sber.ItemName(rg[1])))
+            return C.MapFor(rg[1], C.Sber.ItemName(rg[1]))
+        end
+    end
     local pts = itemID and C.Sber.Points(itemID)
     if pts and #pts > 0 then
         local a, b, inst = C.PlayerWorld()

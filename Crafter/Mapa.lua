@@ -207,7 +207,8 @@ local function nearestOf(ptsList)
     return bestName, zone, best
 end
 
-function C.HowToGet(itemID)
+function C.HowToGet(itemID, depth)
+    depth = depth or 0
     local out = {}
     local mine, f
     if C.Sber then mine, f = C.Sber.Points(itemID) end
@@ -259,7 +260,22 @@ function C.HowToGet(itemID)
             local name, zone = nearestOf(list)
             out[#out + 1] = { "d", ("Padá z mobů – třeba %s (%s)"):format(name or "?", zone or "?") }
         end
-        if z.c then out[#out + 1] = { "c", "Vyrobíš: " .. table.concat(z.c, ", ") } end
+        if z.c then
+            if z.r and depth == 0 then
+                -- řetězec: z čeho se vyrábí a kde se sežene to (bar <- ruda)
+                local parts = {}
+                for _, rg in ipairs(z.r) do parts[#parts + 1] = ("%s ×%d"):format(C.Sber.ItemName(rg[1]), rg[2]) end
+                out[#out + 1] = { "c", ("Vyrobíš (%s) z: %s"):format(z.c[1], table.concat(parts, ", ")) }
+                for _, rg in ipairs(z.r) do
+                    local sub = C.HowToGet(rg[1], depth + 1)
+                    for i = 1, math.min(2, #sub) do
+                        if sub[i][1] ~= "?" then out[#out + 1] = { sub[i][1], "   " .. C.Sber.ItemName(rg[1]) .. ": " .. sub[i][2] } end
+                    end
+                end
+            else
+                out[#out + 1] = { "c", "Vyrobíš: " .. table.concat(z.c, ", ") }
+            end
+        end
     end
     if #out == 0 then out[1] = { "?", "Nevím, kde se sežene (nová věc ve Forever?). Až ji získáš sběrem, Crafter si místo zapamatuje." } end
     return out

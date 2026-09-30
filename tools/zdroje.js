@@ -61,6 +61,7 @@ for (const r of rows("item_template")) items[r.entry] = { name: r.name, cls: num
 
 console.log("čtu spell_template…");
 const crafted = {};     // itemID -> [názvy receptů]
+const craftFrom = {};   // itemID -> [[surovina, počet], …] z prvního receptu (Copper Bar <- Copper Ore ×1)
 const wanted = new Set();
 for (const s of rows("spell_template")) {
   for (let e = 1; e <= 3; e++) {
@@ -68,11 +69,16 @@ for (const s of rows("spell_template")) {
     const made = s["EffectItemType" + e];
     if (!made || !items[made]) continue;
     let hasReagent = false;
+    const list = [];
     for (let k = 1; k <= 8; k++) {
       const rg = s["Reagent" + k];
-      if (rg && rg !== "0" && items[rg]) { wanted.add(rg); hasReagent = true; }
+      if (rg && rg !== "0" && items[rg]) { wanted.add(rg); hasReagent = true; list.push([Number(rg), Math.max(1, num(s["ReagentCount" + k]))]); }
     }
-    if (hasReagent) (crafted[made] = crafted[made] || []).push(s.SpellName);
+    if (hasReagent) {
+      (crafted[made] = crafted[made] || []).push(s.SpellName);
+      // nejjednodušší recept (nejméně druhů surovin) – pro řetězec „bar z rudy“
+      if (!craftFrom[made] || list.length < craftFrom[made].length) craftFrom[made] = list;
+    }
   }
 }
 for (const [id, it] of Object.entries(items)) if (it.cls === 7) wanted.add(id);   // Trade Goods
@@ -186,7 +192,7 @@ const out = {};
 for (const id of wanted) {
   const it = items[id];
   if (!it) continue;
-  const e = {};
+  const e = { n: it.name };   // jméno předmětu (záloha, když ho hra ještě nezná)
   const vendors = [...(vendorIdx[id] || [])].filter(useNpc);   // všichni – nejbližšího vybírá addon podle polohy
   if (vendors.length) { e.v = vendors.map(Number); e.price = Math.round(it.buy / it.buyCount); }
 
@@ -215,8 +221,8 @@ for (const id of wanted) {
     .sort((a, b) => b[1].chance - a[1].chance).slice(0, 6).map(([gid, v]) => [Number(gid), Math.round(v.chance)]);
   if (g.length) e.g = g;
 
-  if (crafted[id]) e.c = [...new Set(crafted[id])].slice(0, 3);
-  if (Object.keys(e).length) out[id] = e;
+  if (crafted[id]) { e.c = [...new Set(crafted[id])].slice(0, 3); e.r = craftFrom[id]; }
+  if (Object.keys(e).length > 1) out[id] = e;
 }
 
 // --- ložiska rud a byliny: VŠECHNA místa (pro mapu a minimapu jako Gatherer) -----
