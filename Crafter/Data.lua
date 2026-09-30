@@ -20,6 +20,25 @@ local DEFAULTS = {
 
 function C.Msg(text) print("|cffe6b34dCrafter:|r " .. text) end
 
+-- Nový klient (Forever) má funkce pro předměty v C_Item, starý globálně – použít, co existuje
+local GetItemInfo = GetItemInfo or (C_Item and C_Item.GetItemInfo)
+local function GetItemCount(id, bank)
+    if C_Item and C_Item.GetItemCount then return C_Item.GetItemCount(id, bank) or 0 end
+    if _G.GetItemCount then return _G.GetItemCount(id, bank) or 0 end
+    return 0
+end
+local function itemName(id)
+    local n = GetItemInfo and GetItemInfo(id)
+    if not n and C_Item and C_Item.GetItemNameByID then n = C_Item.GetItemNameByID(id) end
+    if not n and C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+    return n
+end
+local function itemIcon(id)
+    if C_Item and C_Item.GetItemIconByID then return C_Item.GetItemIconByID(id) end
+    return GetItemInfo and select(10, GetItemInfo(id))
+end
+C.GetItemCount = GetItemCount
+
 local function itemIDFromLink(link)
     return link and tonumber(link:match("item:(%d+)"))
 end
@@ -117,9 +136,12 @@ local RETAIL = {
             and ProfessionsFrame ~= nil and ProfessionsFrame:IsShown()
     end,
     line = function()
-        local info = C_TradeSkillUI.GetChildProfessionInfo and C_TradeSkillUI.GetChildProfessionInfo()
-        if not info or not info.professionName then info = C_TradeSkillUI.GetBaseProfessionInfo() end
-        return info.professionName, info.skillLevel, info.maxSkillLevel
+        -- stupeň profese (child) může být ve Forever prázdný (0/0) -> vzít ten, co má dovednost
+        local child = C_TradeSkillUI.GetChildProfessionInfo and C_TradeSkillUI.GetChildProfessionInfo()
+        local base = C_TradeSkillUI.GetBaseProfessionInfo and C_TradeSkillUI.GetBaseProfessionInfo()
+        local info = (child and (child.maxSkillLevel or 0) > 0) and child or base or child or {}
+        local name = info.professionName or (base and base.professionName) or (child and child.professionName)
+        return name, info.skillLevel, info.maxSkillLevel
     end,
     recipes = function()
         local out = {}
@@ -133,8 +155,7 @@ local RETAIL = {
                     for _, slot in ipairs(schem.reagentSlotSchematics or {}) do
                         local reagent = slot.reagents and slot.reagents[1]
                         if reagent and reagent.itemID and slot.reagentType == 1 then
-                            local iName, _, _, _, _, _, _, _, _, iIcon = GetItemInfo(reagent.itemID)
-                            r.reagents[#r.reagents + 1] = reagentInfo(reagent.itemID, iName, iIcon, slot.quantityRequired)
+                            r.reagents[#r.reagents + 1] = reagentInfo(reagent.itemID, itemName(reagent.itemID), itemIcon(reagent.itemID), slot.quantityRequired)
                         end
                     end
                 end
@@ -225,7 +246,7 @@ function C.ListTotals()
     local out = {}
     for id, n in pairs(need) do
         local have = GetItemCount(id, true) or 0
-        out[#out + 1] = { id = id, name = CrafterDB.itemNames[id] or GetItemInfo(id) or ("#" .. id), icon = CrafterDB.itemIcons[id],
+        out[#out + 1] = { id = id, name = CrafterDB.itemNames[id] or itemName(id) or ("#" .. id), icon = CrafterDB.itemIcons[id] or itemIcon(id),
                           need = n, have = have, missing = math.max(0, n - have), price = CrafterDB.prices[id] }
     end
     table.sort(out, function(a, b)
