@@ -7,6 +7,7 @@ local W = 640   -- šířka mapy v okně (mění se táhlem, pamatuje se v Craft
 local win, canvas, tiles, pins, arrow = nil, nil, {}, {}, nil
 local overlays = {}   -- objevené části mapy
 local mapID, onlyItem, target, star
+local view, zoom = nil, 1   -- výřez mapy (ScrollFrame) a přiblížení 1–6×
 
 local function fs(parent, size, r, g, b)
     local t = parent:CreateFontString(nil, "OVERLAY")
@@ -23,14 +24,15 @@ local function drawArt()
     local textures = C_Map.GetMapArtLayerTextures and C_Map.GetMapArtLayerTextures(mapID, 1)
     local H = W * 2 / 3
     if layer and layer.layerWidth and layer.layerWidth > 0 then H = W * layer.layerHeight / layer.layerWidth end
-    canvas:SetSize(W, H)
+    view:SetSize(W, H)
+    canvas:SetSize(W * zoom, H * zoom)
     win.sizing = true
-    win:SetSize(W + 20, H + 96)
+    win:SetSize(W + 20, H + 122)
     win.sizing = false
     for _, t in ipairs(overlays) do t:Hide() end
     if not layer or not textures then return end
     local cols = math.ceil(layer.layerWidth / layer.tileWidth)
-    local k = W / layer.layerWidth
+    local k = W * zoom / layer.layerWidth
     for i, fileID in ipairs(textures) do
         local t = tiles[i]
         if not t then t = canvas:CreateTexture(nil, "BACKGROUND"); tiles[i] = t end
@@ -106,7 +108,6 @@ local function drawPins()
             local p = pins[n]
             if not p then
                 p = CreateFrame("Frame", nil, canvas)
-                p:SetSize(18, 18)
                 p.tex = p:CreateTexture(nil, "OVERLAY")
                 p.tex:SetAllPoints()
                 p.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
@@ -116,6 +117,7 @@ local function drawPins()
                 pins[n] = p
             end
             p.itemID, p.kind = pt[3], pt[4]
+            p:SetSize(CrafterDB.mapIcon or 18, CrafterDB.mapIcon or 18)
             p.tex:SetTexture(C.Sber.IconOf(pt[3]))
             p:ClearAllPoints()
             p:SetPoint("CENTER", canvas, "TOPLEFT", pt[1] * w, -pt[2] * h)
@@ -170,6 +172,7 @@ local function updateArrow()
 end
 
 local function show(id)
+    if id ~= mapID then zoom = 1; if win and win.zoomText then win.zoomText:SetText("1.0×") end end
     mapID = id
     drawArt()
     drawPins()
@@ -264,20 +267,123 @@ local function create()
     all:SetText("Ukázat vše")
     all:SetScript("OnClick", function() onlyItem = nil; target = nil; drawPins() end)
 
-    canvas = CreateFrame("Frame", nil, win)
-    canvas:SetPoint("TOPLEFT", 10, -60)
-    -- posouvat se dá i tažením za mapu
+    view = CreateFrame("ScrollFrame", nil, win)
+    view:SetPoint("TOPLEFT", 10, -60)
+    view:SetClipsChildren(true)
+    canvas = CreateFrame("Frame", nil, view)
+    canvas:SetSize(W, W * 2 / 3)
+    view:SetScrollChild(canvas)
+
+    -- posun výřezu (hlídá okraje)
+    local function scrollTo(x, y)
+        local maxX = math.max(0, canvas:GetWidth() - view:GetWidth())
+        local maxY = math.max(0, canvas:GetHeight() - view:GetHeight())
+        view:SetHorizontalScroll(math.max(0, math.min(maxX, x)))
+        view:SetVerticalScroll(math.max(0, math.min(maxY, y)))
+    end
+    -- přiblížit kolem bodu (fx, fy = 0..1 ve výřezu)
+    local function setZoom(z, fx, fy)
+        z = math.max(1, math.min(6, z))
+        if z == zoom then return end
+        fx, fy = fx or 0.5, fy or 0.5
+        local cx = (view:GetHorizontalScroll() + fx * view:GetWidth()) / canvas:GetWidth()
+        local cy = (view:GetVerticalScroll() + fy * view:GetHeight()) / canvas:GetHeight()
+        zoom = z
+        drawArt()
+        drawPins()
+        scrollTo(cx * canvas:GetWidth() - fx * view:GetWidth(), cy * canvas:GetHeight() - fy * view:GetHeight())
+        win.zoomText:SetText(("%.1f×"):format(zoom))
+    end
+    win.setZoom = setZoom
+    win.scrollTo = scrollTo
+
+    view:EnableMouseWheel(true)
+    view:SetScript("OnMouseWheel", function(self, delta)
+        local x, y = GetCursorPosition()
+        local s = self:GetEffectiveScale()
+        local fx = (x / s - self:GetLeft()) / self:GetWidth()
+        local fy = (self:GetTop() - y / s) / self:GetHeight()
+        setZoom(zoom * (delta > 0 and 1.25 or 0.8), fx, fy)
+    end)
+
+    -- tažení: přiblížená mapa se posouvá, oddálená posouvá celé okno
     canvas:EnableMouse(true)
     canvas:RegisterForDrag("LeftButton")
-    canvas:SetScript("OnDragStart", function() win:StartMoving() end)
-    canvas:SetScript("OnDragStop", function() win.savePos() end)
+    canvas:SetScript("OnDragStart", function(self)
+        if zoom <= 1 then win:StartMoving() return end
+        local x, y = GetCursorPosition()
+        self.drag = { x = x, y = y, sx = view:GetHorizontalScroll(), sy = view:GetVerticalScroll() }
+        self:SetScript("OnUpdate", function(me)
+            local cx, cy = GetCursorPosition()
+            local s = me:GetEffectiveScale()
+            scrollTo(me.drag.sx - (cx - me.drag.x) / s, me.drag.sy + (cy - me.drag.y) / s)
+        end)
+    end)
+    canvas:SetScript("OnDragStop", function(self)
+        if self.drag then self.drag = nil; self:SetScript("OnUpdate", nil) else win.savePos() end
+    end)
     arrow = canvas:CreateTexture(nil, "OVERLAY", nil, 7)
     arrow:SetTexture("Interface\\Minimap\\MinimapArrow")
     arrow:SetSize(28, 28)
 
+    local zOut = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
+    zOut:SetSize(24, 22)
+    zOut:SetPoint("BOTTOMLEFT", 8, 34)
+    zOut:SetText("-")
+    zOut:SetScript("OnClick", function() win.setZoom(zoom * 0.8) end)
+    win.zoomText = fs(win, 11)
+    win.zoomText:SetPoint("LEFT", zOut, "RIGHT", 4, 0)
+    win.zoomText:SetWidth(34)
+    win.zoomText:SetText("1.0×")
+    local zIn = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
+    zIn:SetSize(24, 22)
+    zIn:SetPoint("LEFT", win.zoomText, "RIGHT", 4, 0)
+    zIn:SetText("+")
+    zIn:SetScript("OnClick", function() win.setZoom(zoom * 1.25) end)
+    local me = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
+    me:SetSize(60, 22)
+    me:SetPoint("LEFT", zIn, "RIGHT", 6, 0)
+    me:SetNormalFontObject(CrafterFontButton)
+    me:SetHighlightFontObject(CrafterFontButtonHl)
+    me:SetText("Na mě")
+    me:SetScript("OnClick", function()
+        local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+        if not pos then C.Msg("nejsi na teto mape.") return end
+        if zoom < 2 then win.setZoom(2.5) end
+        win.scrollTo(pos.x * canvas:GetWidth() - view:GetWidth() / 2, pos.y * canvas:GetHeight() - view:GetHeight() / 2)
+    end)
+
+    -- velikost ikonek (mapa, minimapa)
+    local function sizeStepper(x, label, key, default, apply)
+        local l = fs(win, 11)
+        l:SetPoint("BOTTOMLEFT", x, 13)
+        l:SetText(label)
+        local minus = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
+        minus:SetSize(22, 20)
+        minus:SetPoint("LEFT", l, "RIGHT", 6, 0)
+        minus:SetText("-")
+        local val = fs(win, 11)
+        val:SetPoint("LEFT", minus, "RIGHT", 3, 0)
+        val:SetWidth(22)
+        local plus = CreateFrame("Button", nil, win, "UIPanelButtonTemplate")
+        plus:SetSize(22, 20)
+        plus:SetPoint("LEFT", val, "RIGHT", 3, 0)
+        plus:SetText("+")
+        local function set(v)
+            CrafterDB[key] = math.max(8, math.min(40, v))
+            val:SetText(CrafterDB[key])
+            apply()
+        end
+        minus:SetScript("OnClick", function() set((CrafterDB[key] or default) - 2) end)
+        plus:SetScript("OnClick", function() set((CrafterDB[key] or default) + 2) end)
+        val:SetText(CrafterDB[key] or default)
+    end
+    sizeStepper(10, "Ikonky: mapa", "mapIcon", 18, function() drawPins() end)
+    sizeStepper(185, "minimapa", "miniIcon", 14, function() end)
+
     win.count = fs(win, 11, 0.75, 0.75, 0.75)
-    win.count:SetPoint("BOTTOMLEFT", 10, 12)
-    win.count:SetPoint("RIGHT", win, "RIGHT", -170, 0)
+    win.count:SetPoint("BOTTOMLEFT", 170, 38)
+    win.count:SetPoint("RIGHT", win, "RIGHT", -24, 0)
     win.count:SetJustifyH("LEFT")
     win.count:SetWordWrap(false)
 
@@ -300,7 +406,7 @@ local function create()
         C_Timer.After(0.15, function()
             pendingResize = nil
             local newW = math.floor(math.max(540, math.min(1580, win:GetWidth() - 20)))
-            if newW ~= W or math.abs(win:GetHeight() - (canvas:GetHeight() + 96)) > 2 then
+            if newW ~= W or math.abs(win:GetHeight() - (view:GetHeight() + 122)) > 2 then
                 W = newW
                 CrafterDB.mapW = W
                 if mapID then drawArt(); drawPins() end

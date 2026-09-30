@@ -259,7 +259,7 @@ local function updateMinimap()
                     if rotate then sx, sy = east * cosF + north * sinF, -east * sinF + north * cosF end
                     n = n + 1
                     local p = getPin(miniPins, n, Minimap)
-                    p:SetSize(14, 14)
+                    p:SetSize(CrafterDB.miniIcon or 14, CrafterDB.miniIcon or 14)
                     p:SetFrameLevel(Minimap:GetFrameLevel() + 5)
                     p.tex:SetTexture(iconOf(pt[3]))
                     p.itemID, p.kind = pt[3], pt[4]
